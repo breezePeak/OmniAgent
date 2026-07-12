@@ -12,6 +12,9 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
     "@omni-agent/shared": "workspace:*",
+    "@omni-agent/memory": "workspace:*",
+    "@omni-agent/site-adapters": "workspace:*",
+    "@omni-agent/storage": "workspace:*",
     "@wxt-dev/module-vue": "^1.0.3",
     "element-plus": "^2.13.2",
     "pinia": "^3.0.4",
