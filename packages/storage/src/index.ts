@@ -261,11 +261,16 @@ export class OmniAgentStorage {
       .toArray();
   }
 
-  async listConversations(providerId?: SupportedProvider): Promise<ConversationRecord[]> {
+  async listConversations(
+    providerId?: SupportedProvider,
+    projectId?: string | null,
+  ): Promise<ConversationRecord[]> {
     const collection = providerId
       ? this.db.conversations.where('providerId').equals(providerId)
       : this.db.conversations.toCollection();
-    return (await collection.toArray()).sort((a, b) => b.updatedAt - a.updatedAt);
+    let rows = await collection.toArray();
+    if (projectId) rows = rows.filter((row) => row.projectId === projectId);
+    return rows.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   async updateConversationTitle(id: string, title: string): Promise<void> {

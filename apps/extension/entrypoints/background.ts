@@ -136,10 +136,19 @@ export default defineBackground(() => {
       await persistPageMessage(message as ExtensionMessage<'omni:response-update'>);
       return undefined;
     }
-    if (message.type === 'omni:list-conversations') return storage.listConversations();
+    if (message.type === 'omni:list-conversations') {
+      const payload = message.payload as ExtensionMessage<'omni:list-conversations'>['payload'];
+      return storage.listConversations(payload?.providerId, payload?.projectId);
+    }
     if (message.type === 'omni:list-messages') {
       const payload = message.payload as { conversationId?: string } | undefined;
       return payload?.conversationId ? storage.listMessages(payload.conversationId) : [];
+    }
+    if (message.type === 'omni:export-data') return exportWorkspaceData();
+    if (message.type === 'omni:import-data') {
+      const payload = message.payload as ExtensionMessage<'omni:import-data'>['payload'];
+      if (!payload?.payload?.trim()) throw new Error('导入内容不能为空');
+      return importWorkspaceData(payload.payload);
     }
     if (message.type === 'omni:list-memories') return storage.listMemories();
     if (message.type === 'omni:save-memory') {
@@ -561,6 +570,131 @@ async function formatProjectContext(projectId?: string | null): Promise<string> 
     project.context ? `上下文：${project.context}` : '',
     '</omniagent-project>',
   ].filter(Boolean).join('\n');
+}
+
+async function exportWorkspaceData() {
+  const [memories, skillsList, projects, settings, activeProjectId, conversations] = await Promise.all([
+    storage.listMemories(),
+    skills.list(),
+    storage.listProjects(),
+    getRuntimeSettings(),
+    storage.getActiveProjectId(),
+    storage.listConversations(),
+  ]);
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    settings,
+    activeProjectId,
+    memories,
+    skills: skillsList,
+    projects,
+    conversations: conversations.map((item) => ({
+      id: item.id,
+      providerId: item.providerId,
+      externalId: item.externalId,
+      title: item.title,
+      projectId: item.projectId,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    })),
+  };
+}
+
+async function importWorkspaceData(raw: string) {
+  let parsed: {
+    settings?: Partial<RuntimeSettings>;
+    activeProjectId?: string | null;
+    memories?: Array<Record<string, unknown>>;
+    skills?: Array<Record<string, unknown>>;
+    projects?: Array<Record<string, unknown>>;
+  };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new Error('导入 JSON 无效');
+  }
+
+  if (parsed.settings) {
+    const current = await getRuntimeSettings();
+    await storage.setSetting(runtimeSettingsKey, {
+      injectMemory: parsed.settings.injectMemory ?? current.injectMemory,
+      injectSkills: parsed.settings.injectSkills ?? current.injectSkills,
+      injectTools: parsed.settings.injectTools ?? current.injectTools,
+      injectProject: parsed.settings.injectProject ?? current.injectProject,
+    });
+  }
+
+  let importedProjects = 0;
+  for (const project of parsed.projects ?? []) {
+    if (typeof project.name !== 'string' || !project.name.trim()) continue;
+    await storage.saveProject({
+      id: typeof project.id === 'string' && project.id ? project.id : crypto.randomUUID(),
+      name: project.name.trim(),
+      description: typeof project.description === 'string' ? project.description : '',
+      context: typeof project.context === 'string' ? project.context : '',
+      status: project.status === 'paused' || project.status === 'archived' ? project.status : 'active',
+    });
+    importedProjects += 1;
+  }
+  if (typeof parsed.activeProjectId === 'string' || parsed.activeProjectId === null) {
+    await storage.setActiveProjectId(parsed.activeProjectId);
+  }
+
+  let importedMemories = 0;
+  for (const item of parsed.memories ?? []) {
+    if (typeof item.content !== 'string' || !item.content.trim()) continue;
+    await memory.save({
+      type: (item.type as 'knowledge' | 'preference' | 'profile' | 'project' | 'episode' | 'procedure') || 'knowledge',
+      content: item.content,
+      summary: typeof item.summary === 'string' ? item.summary : undefined,
+      importance: typeof item.importance === 'number' ? item.importance : 0.7,
+      confidence: typeof item.confidence === 'number' ? item.confidence : 0.8,
+      scope: item.scope === 'provider' || item.scope === 'project' ? item.scope : 'global',
+      providerId: (item.providerId as 'deepseek' | 'kimi' | null | undefined) ?? null,
+      projectId: typeof item.projectId === 'string' ? item.projectId : null,
+    });
+    importedMemories += 1;
+  }
+
+  let importedSkills = 0;
+  for (const item of parsed.skills ?? []) {
+    const name = typeof item.name === 'string'
+      ? item.name
+      : (item.manifest && typeof item.manifest === 'object' && typeof (item.manifest as { name?: string }).name === 'string'
+        ? (item.manifest as { name: string }).name
+        : '');
+    const prompt = typeof item.prompt === 'string' ? item.prompt : '';
+    if (!name.trim() || !prompt.trim()) continue;
+    const manifest = (item.manifest && typeof item.manifest === 'object')
+      ? item.manifest as Record<string, unknown>
+      : {};
+    await skills.register({
+      id: typeof item.id === 'string' ? item.id : undefined,
+      name,
+      description: typeof item.description === 'string'
+        ? item.description
+        : (typeof manifest.description === 'string' ? manifest.description : name),
+      prompt,
+      triggers: Array.isArray(item.triggers)
+        ? item.triggers as string[]
+        : (Array.isArray(manifest.triggers) ? manifest.triggers as string[] : []),
+      tools: Array.isArray(item.tools)
+        ? item.tools as string[]
+        : (Array.isArray(manifest.tools) ? manifest.tools as string[] : []),
+      workflow: Array.isArray(item.workflow) ? item.workflow as string[] : [],
+      source: item.source === 'builtin' ? 'builtin' : 'user',
+      enabled: item.enabled !== false,
+    });
+    importedSkills += 1;
+  }
+
+  return {
+    ok: true,
+    importedProjects,
+    importedMemories,
+    importedSkills,
+  };
 }
 
 async function persistPageMessage(message: ExtensionMessage<'omni:response-update'>) {

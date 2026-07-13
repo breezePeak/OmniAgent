@@ -48,8 +48,14 @@ export const useExtensionStore = defineStore('extension', {
     conversationError: '',
     savedConversations: [] as ConversationRecord[],
     selectedConversationId: '',
+    conversationProviderFilter: '' as '' | 'deepseek' | 'kimi',
+    conversationProjectOnly: false,
     savedMessages: [] as MessageRecord[],
     storageLoading: false,
+    backupJson: '',
+    backupLoading: false,
+    backupError: '',
+    backupMessage: '',
     memories: [] as MemoryRecord[],
     memoryDraft: '',
     memoryLoading: false,
@@ -154,10 +160,22 @@ export const useExtensionStore = defineStore('extension', {
     async refreshSavedConversations() {
       this.storageLoading = true;
       try {
+        if (this.conversationProjectOnly && !this.activeProjectId) {
+          this.savedConversations = [];
+          this.selectedConversationId = '';
+          this.savedMessages = [];
+          return;
+        }
         this.savedConversations = await browser.runtime.sendMessage<
           ExtensionMessage<'omni:list-conversations'>,
           ConversationRecord[]
-        >({ type: 'omni:list-conversations' });
+        >({
+          type: 'omni:list-conversations',
+          payload: {
+            providerId: this.conversationProviderFilter || undefined,
+            projectId: this.conversationProjectOnly ? this.activeProjectId : undefined,
+          },
+        });
         if (!this.savedConversations.some((conversation) => conversation.id === this.selectedConversationId)) {
           this.selectedConversationId = this.savedConversations[0]?.id ?? '';
         }
@@ -577,6 +595,49 @@ export const useExtensionStore = defineStore('extension', {
         this.settingsError = error instanceof Error ? error.message : '更新设置失败';
       } finally {
         this.settingsLoading = false;
+      }
+    },
+    async exportData() {
+      this.backupLoading = true;
+      this.backupError = '';
+      this.backupMessage = '';
+      try {
+        const data = await browser.runtime.sendMessage<ExtensionMessage<'omni:export-data'>, unknown>({
+          type: 'omni:export-data',
+        });
+        this.backupJson = JSON.stringify(data, null, 2);
+        this.backupMessage = '导出成功，可复制下方 JSON';
+      } catch (error) {
+        this.backupError = error instanceof Error ? error.message : '导出失败';
+      } finally {
+        this.backupLoading = false;
+      }
+    },
+    async importData() {
+      if (!this.backupJson.trim()) return;
+      this.backupLoading = true;
+      this.backupError = '';
+      this.backupMessage = '';
+      try {
+        const result = await browser.runtime.sendMessage<
+          ExtensionMessage<'omni:import-data'>,
+          { ok: boolean; importedProjects: number; importedMemories: number; importedSkills: number }
+        >({
+          type: 'omni:import-data',
+          payload: { payload: this.backupJson },
+        });
+        this.backupMessage = `导入完成：项目 ${result.importedProjects}，记忆 ${result.importedMemories}，Skill ${result.importedSkills}`;
+        await Promise.all([
+          this.refreshProjects(),
+          this.refreshMemories(),
+          this.refreshSkills(),
+          this.refreshSettings(),
+          this.refreshSavedConversations(),
+        ]);
+      } catch (error) {
+        this.backupError = error instanceof Error ? error.message : '导入失败';
+      } finally {
+        this.backupLoading = false;
       }
     },
   },

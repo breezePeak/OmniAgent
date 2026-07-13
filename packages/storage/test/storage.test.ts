@@ -114,4 +114,14 @@ test('stores providers, conversations, messages, and settings locally', async (t
   await storage.setActiveProjectId(project.id);
   assert.equal(await storage.getActiveProjectId(), 'project-1');
   assert.equal((await storage.listProjects())[0]?.name, 'OmniAgent');
+
+  const projectConversation = await storage.getOrCreateConversation({
+    providerId: 'kimi',
+    externalId: 'kimi-1',
+    title: '项目会话',
+    projectId: 'project-1',
+  });
+  assert.equal(projectConversation.projectId, 'project-1');
+  assert.equal((await storage.listConversations('kimi', 'project-1')).length, 1);
+  assert.equal((await storage.listConversations('deepseek', 'project-1')).length, 0);
 });

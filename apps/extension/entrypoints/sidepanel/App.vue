@@ -136,6 +136,26 @@ onMounted(() => {
           </el-button>
         </div>
       </div>
+      <div class="filter-row">
+        <el-select
+          v-model="extension.conversationProviderFilter"
+          class="filter-select"
+          clearable
+          placeholder="全部平台"
+          @change="extension.refreshSavedConversations"
+        >
+          <el-option label="DeepSeek" value="deepseek" />
+          <el-option label="Kimi" value="kimi" />
+        </el-select>
+        <label class="filter-check">
+          <el-switch
+            v-model="extension.conversationProjectOnly"
+            size="small"
+            @change="extension.refreshSavedConversations"
+          />
+          <span>仅活动项目</span>
+        </label>
+      </div>
       <el-select
         v-model="extension.selectedConversationId"
         class="conversation-select"
@@ -293,6 +313,28 @@ onMounted(() => {
         <p class="response-text">{{ formatToolResult(extension.lastToolResult) }}</p>
       </div>
       <p v-else class="empty-text">尚未执行工具</p>
+    </section>
+
+    <section class="capability-card">
+      <div class="section-heading">
+        <h2>备份 / 恢复</h2>
+        <el-button text :loading="extension.backupLoading" @click="extension.exportData">导出</el-button>
+      </div>
+      <el-input
+        v-model="extension.backupJson"
+        class="skill-input"
+        type="textarea"
+        :rows="5"
+        placeholder="导出结果或粘贴导入 JSON"
+      />
+      <div class="agent-actions">
+        <el-button :loading="extension.backupLoading" @click="extension.exportData">导出数据</el-button>
+        <el-button type="primary" :loading="extension.backupLoading" :disabled="!extension.backupJson.trim()" @click="extension.importData">
+          导入数据
+        </el-button>
+      </div>
+      <el-alert v-if="extension.backupError" class="action-error" :title="extension.backupError" type="error" :closable="false" />
+      <el-alert v-if="extension.backupMessage" class="action-error" :title="extension.backupMessage" type="success" :closable="false" />
     </section>
 
     <section class="capability-card">

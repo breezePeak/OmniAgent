@@ -41,3 +41,6 @@ h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .agent-actions .el-button { flex: 1; }
 .settings-grid { display: grid; gap: 10px; margin-top: 8px; }
 .setting-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #334155; font-size: 13px; }
+.filter-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.filter-select { flex: 1; }
+.filter-check { display: flex; align-items: center; gap: 6px; color: #64748b; font-size: 12px; white-space: nowrap; }

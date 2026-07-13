@@ -17,8 +17,10 @@ export interface ConversationTurn {
 export interface ExtensionMessageMap {
   'omni:adapter-status': Record<string, never>;
   'omni:conversation-snapshot': Record<string, never>;
-  'omni:list-conversations': Record<string, never>;
+  'omni:list-conversations': { providerId?: SupportedProvider; projectId?: string | null };
   'omni:list-messages': { conversationId: string };
+  'omni:export-data': Record<string, never>;
+  'omni:import-data': { payload: string };
   'omni:list-memories': Record<string, never>;
   'omni:save-memory': { content: string };
   'omni:delete-memory': { id: string };
