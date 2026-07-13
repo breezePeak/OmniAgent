@@ -22,6 +22,13 @@ interface MemoryInjectionDiagnostic {
   at: number;
 }
 
+interface RuntimeSettings {
+  injectMemory: boolean;
+  injectSkills: boolean;
+  injectTools: boolean;
+  injectProject: boolean;
+}
+
 const unsupported: AdapterStatus = {
   provider: null,
   url: '',
@@ -76,6 +83,14 @@ export const useExtensionStore = defineStore('extension', {
     projectDraftContext: '',
     projectLoading: false,
     projectError: '',
+    settings: {
+      injectMemory: true,
+      injectSkills: true,
+      injectTools: true,
+      injectProject: true,
+    } as RuntimeSettings,
+    settingsLoading: false,
+    settingsError: '',
     listening: false,
   }),
   actions: {
@@ -535,6 +550,33 @@ export const useExtensionStore = defineStore('extension', {
         this.projectError = error instanceof Error ? error.message : '删除项目失败';
       } finally {
         this.projectLoading = false;
+      }
+    },
+    async refreshSettings() {
+      this.settingsLoading = true;
+      try {
+        this.settings = await browser.runtime.sendMessage<ExtensionMessage<'omni:get-settings'>, RuntimeSettings>({
+          type: 'omni:get-settings',
+        });
+        this.settingsError = '';
+      } catch (error) {
+        this.settingsError = error instanceof Error ? error.message : '读取设置失败';
+      } finally {
+        this.settingsLoading = false;
+      }
+    },
+    async updateSettings(patch: Partial<RuntimeSettings>) {
+      this.settingsLoading = true;
+      try {
+        this.settings = await browser.runtime.sendMessage<ExtensionMessage<'omni:update-settings'>, RuntimeSettings>({
+          type: 'omni:update-settings',
+          payload: patch,
+        });
+        this.settingsError = '';
+      } catch (error) {
+        this.settingsError = error instanceof Error ? error.message : '更新设置失败';
+      } finally {
+        this.settingsLoading = false;
       }
     },
   },

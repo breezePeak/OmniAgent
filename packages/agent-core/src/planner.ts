@@ -85,29 +85,53 @@ export function planActions(goal: string, context: AgentContext, history: AgentS
     });
   }
 
+  const latestSnapshot = findLatestSnapshot(history);
+
   if (/输入|填写|type/u.test(goal)) {
     const value = extractQuoted(goal) || goal.replace(/.*(输入|填写|type)\s*/u, '').trim();
     if (value) {
+      const inputRef = findElementRef(latestSnapshot, ['textbox', 'input', 'textarea', 'search']);
       actions.push({
         type: 'tool',
         title: '向页面输入文本',
         toolName: 'browser.type',
-        toolArguments: {
-          selector: 'input, textarea, [contenteditable="true"]',
-          value,
-          clear: true,
-        },
+        toolArguments: inputRef
+          ? { ref: inputRef, value, clear: true }
+          : {
+            selector: 'input, textarea, [contenteditable="true"]',
+            value,
+            clear: true,
+          },
       });
     }
   }
 
   if (/点击|click/u.test(goal)) {
-    const text = extractQuoted(goal) || goal.replace(/.*(点击|click)\s*/u, '').trim();
+    const text = extractClickTarget(goal);
+    const clickRef = text
+      ? findElementRefByName(latestSnapshot, text)
+      : findElementRef(latestSnapshot, ['button', 'link', 'submit', 'search']);
     actions.push({
       type: 'tool',
       title: '点击页面元素',
       toolName: 'browser.click',
-      toolArguments: text ? { text } : { selector: 'button, a, [role="button"]' },
+      toolArguments: clickRef
+        ? { ref: clickRef }
+        : (text ? { text } : { selector: 'button, a, [role="button"]' }),
+    });
+  }
+
+  // If the goal needs page interaction but we have no snapshot yet, capture one first.
+  if (
+    (/输入|填写|type|点击|click/u.test(goal)) &&
+    !latestSnapshot &&
+    !actions.some((action) => action.toolName === 'browser.snapshot')
+  ) {
+    actions.unshift({
+      type: 'tool',
+      title: '抓取页面元素后再操作',
+      toolName: 'browser.snapshot',
+      toolArguments: { includeText: true, includeElements: true, maxLength: 1500, maxElements: 30 },
     });
   }
 
@@ -187,4 +211,50 @@ function inferSiteUrl(goal: string): string | null {
 function extractQuoted(text: string): string | null {
   const match = text.match(/[“"']([^”"']+)[”"']/u);
   return match?.[1]?.trim() || null;
+}
+
+function extractClickTarget(goal: string): string | null {
+  const afterClick = goal.match(/(?:点击|click)\s*[“"']([^”"']+)[”"']/iu);
+  if (afterClick?.[1]) return afterClick[1].trim();
+  const quoted = [...goal.matchAll(/[“"']([^”"']+)[”"']/gu)].map((match) => match[1]?.trim()).filter(Boolean);
+  if (quoted.length > 1) return quoted[quoted.length - 1] ?? null;
+  if (quoted.length === 1 && !/输入|填写|type/u.test(goal)) return quoted[0] ?? null;
+  const fallback = goal.replace(/.*(点击|click)\s*/iu, '').trim();
+  return fallback && fallback !== goal ? fallback : null;
+}
+
+function findLatestSnapshot(history: AgentStep[]): unknown {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const step = history[index];
+    if (step?.type === 'tool' && step.ok && step.toolName === 'browser.snapshot') {
+      return step.toolResult;
+    }
+  }
+  return null;
+}
+
+function findElementRef(snapshot: unknown, rolesOrTags: string[]): string | undefined {
+  const elements = getSnapshotElements(snapshot);
+  const normalized = rolesOrTags.map((item) => item.toLowerCase());
+  const match = elements.find((element) => {
+    const role = String(element.role ?? '').toLowerCase();
+    const tag = String(element.tag ?? '').toLowerCase();
+    const type = String(element.inputType ?? '').toLowerCase();
+    return normalized.some((token) => role.includes(token) || tag.includes(token) || type.includes(token));
+  });
+  return typeof match?.ref === 'string' ? match.ref : undefined;
+}
+
+function findElementRefByName(snapshot: unknown, text: string): string | undefined {
+  const elements = getSnapshotElements(snapshot);
+  const needle = text.toLowerCase();
+  const match = elements.find((element) => String(element.name ?? '').toLowerCase().includes(needle));
+  return typeof match?.ref === 'string' ? match.ref : undefined;
+}
+
+function getSnapshotElements(snapshot: unknown): Array<Record<string, unknown>> {
+  if (!snapshot || typeof snapshot !== 'object') return [];
+  const elements = (snapshot as { elements?: unknown }).elements;
+  if (!Array.isArray(elements)) return [];
+  return elements.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
 }

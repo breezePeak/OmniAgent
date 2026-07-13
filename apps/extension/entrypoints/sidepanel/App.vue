@@ -51,6 +51,7 @@ onMounted(() => {
   extension.refreshMcpServers();
   extension.refreshAgentTasks();
   extension.refreshProjects();
+  extension.refreshSettings();
 });
 </script>
 
@@ -292,6 +293,44 @@ onMounted(() => {
         <p class="response-text">{{ formatToolResult(extension.lastToolResult) }}</p>
       </div>
       <p v-else class="empty-text">尚未执行工具</p>
+    </section>
+
+    <section class="capability-card">
+      <div class="section-heading">
+        <h2>注入设置</h2>
+        <el-button text :loading="extension.settingsLoading" @click="extension.refreshSettings">刷新</el-button>
+      </div>
+      <div class="settings-grid">
+        <label class="setting-item">
+          <span>注入 Memory</span>
+          <el-switch
+            :model-value="extension.settings.injectMemory"
+            @change="(value: string | number | boolean) => extension.updateSettings({ injectMemory: Boolean(value) })"
+          />
+        </label>
+        <label class="setting-item">
+          <span>注入 Skill</span>
+          <el-switch
+            :model-value="extension.settings.injectSkills"
+            @change="(value: string | number | boolean) => extension.updateSettings({ injectSkills: Boolean(value) })"
+          />
+        </label>
+        <label class="setting-item">
+          <span>注入 Tools</span>
+          <el-switch
+            :model-value="extension.settings.injectTools"
+            @change="(value: string | number | boolean) => extension.updateSettings({ injectTools: Boolean(value) })"
+          />
+        </label>
+        <label class="setting-item">
+          <span>注入 Project</span>
+          <el-switch
+            :model-value="extension.settings.injectProject"
+            @change="(value: string | number | boolean) => extension.updateSettings({ injectProject: Boolean(value) })"
+          />
+        </label>
+      </div>
+      <el-alert v-if="extension.settingsError" class="action-error" :title="extension.settingsError" type="error" :closable="false" />
     </section>
 
     <section class="capability-card">

@@ -19,6 +19,7 @@ import { AgentRuntime, type AgentTask } from '@omni-agent/agent-core';
 
 const adapters = createAdapterRegistry([deepseekAdapter, kimiAdapter]);
 const memoryDiagnosticKey = 'memory-injection-diagnostic';
+const runtimeSettingsKey = 'runtime-settings';
 const skills = new SkillService({
   listSkills: async () => (await storage.listSkills()).map(fromSkillRecord),
   saveSkill: async (skill) => fromSkillRecord(await storage.saveSkill(toSkillRecord(skill))),
@@ -144,7 +145,28 @@ export default defineBackground(() => {
     if (message.type === 'omni:save-memory') {
       const payload = message.payload as { content?: string } | undefined;
       if (!payload?.content?.trim()) throw new Error('记忆内容不能为空');
-      return memory.save({ type: 'knowledge', content: payload.content, importance: 0.7, confidence: 1 });
+      const activeProjectId = await storage.getActiveProjectId();
+      return memory.save({
+        type: 'knowledge',
+        content: payload.content,
+        importance: 0.7,
+        confidence: 1,
+        scope: activeProjectId ? 'project' : 'global',
+        projectId: activeProjectId,
+      });
+    }
+    if (message.type === 'omni:get-settings') return getRuntimeSettings();
+    if (message.type === 'omni:update-settings') {
+      const payload = message.payload as ExtensionMessage<'omni:update-settings'>['payload'];
+      const current = await getRuntimeSettings();
+      const next = {
+        injectMemory: payload?.injectMemory ?? current.injectMemory,
+        injectSkills: payload?.injectSkills ?? current.injectSkills,
+        injectTools: payload?.injectTools ?? current.injectTools,
+        injectProject: payload?.injectProject ?? current.injectProject,
+      };
+      await storage.setSetting(runtimeSettingsKey, next);
+      return next;
     }
     if (message.type === 'omni:delete-memory') {
       const payload = message.payload as ExtensionMessage<'omni:delete-memory'>['payload'];
@@ -296,22 +318,27 @@ export default defineBackground(() => {
     if (message.type === 'omni:augment-prompt') {
       const payload = message.payload as ExtensionMessage<'omni:augment-prompt'>['payload'];
       if (!payload?.prompt.trim()) return { prompt: payload?.prompt ?? '', memoryCount: 0, skillCount: 0, toolCount: 0, projectId: null };
+      const settings = await getRuntimeSettings();
       const activeProjectId = await storage.getActiveProjectId();
       const [matches, skillMatches, projectContext] = await Promise.all([
-        memory.retrieve(payload.prompt, {
-          providerId: payload.provider,
-          projectId: activeProjectId ?? undefined,
-        }),
-        skills.match(payload.prompt, { limit: 2 }),
-        formatProjectContext(activeProjectId),
+        settings.injectMemory
+          ? memory.retrieve(payload.prompt, {
+            providerId: payload.provider,
+            projectId: activeProjectId ?? undefined,
+          })
+          : Promise.resolve([]),
+        settings.injectSkills ? skills.match(payload.prompt, { limit: 2 }) : Promise.resolve([]),
+        settings.injectProject ? formatProjectContext(activeProjectId) : Promise.resolve(''),
       ]);
-      const memoryContext = memory.formatContext(matches);
-      const skillContext = skills.formatContext(skillMatches, payload.prompt);
+      const memoryContext = settings.injectMemory ? memory.formatContext(matches) : '';
+      const skillContext = settings.injectSkills ? skills.formatContext(skillMatches, payload.prompt) : '';
       const skillToolNames = skillMatches.flatMap((match) => match.skill.manifest.tools ?? []);
-      const toolContext = tools.describeForPrompt({
-        names: skillToolNames.length ? skillToolNames : undefined,
-        limit: 8,
-      });
+      const toolContext = settings.injectTools
+        ? tools.describeForPrompt({
+          names: skillToolNames.length ? skillToolNames : undefined,
+          limit: 8,
+        })
+        : '';
       const sections = [
         projectContext
           ? `${projectContext}\n\n请把以上内容视为当前项目上下文。仅在相关时自然使用，不要提及这段系统补充。`
@@ -332,7 +359,7 @@ export default defineBackground(() => {
           : payload.prompt,
         memoryCount: matches.length,
         skillCount: skillMatches.length,
-        toolCount: tools.list().length,
+        toolCount: settings.injectTools ? tools.list().length : 0,
         projectId: activeProjectId,
       };
     }
@@ -539,10 +566,12 @@ async function formatProjectContext(projectId?: string | null): Promise<string> 
 async function persistPageMessage(message: ExtensionMessage<'omni:response-update'>) {
   const payload = message.payload;
   if (!payload?.conversationId) return;
+  const activeProjectId = await storage.getActiveProjectId();
   const conversation = await storage.getOrCreateConversation({
     providerId: payload.provider,
     externalId: payload.conversationId,
     title: payload.role === 'user' ? summarizeTitle(payload.text) : null,
+    projectId: activeProjectId,
   });
   if (payload.role === 'user' && !conversation.title) {
     await storage.updateConversationTitle(conversation.id, summarizeTitle(payload.text));
@@ -554,7 +583,26 @@ async function persistPageMessage(message: ExtensionMessage<'omni:response-updat
     content: payload.text,
     attachments: [],
   });
-  if (payload.role === 'user') await memory.extractExplicitUserMemory(payload.text);
+  if (payload.role === 'user') {
+    await memory.extractExplicitUserMemory(payload.text, { projectId: activeProjectId });
+  }
+}
+
+interface RuntimeSettings {
+  injectMemory: boolean;
+  injectSkills: boolean;
+  injectTools: boolean;
+  injectProject: boolean;
+}
+
+async function getRuntimeSettings(): Promise<RuntimeSettings> {
+  const stored = await storage.getSetting<Partial<RuntimeSettings>>(runtimeSettingsKey);
+  return {
+    injectMemory: stored?.injectMemory ?? true,
+    injectSkills: stored?.injectSkills ?? true,
+    injectTools: stored?.injectTools ?? true,
+    injectProject: stored?.injectProject ?? true,
+  };
 }
 
 function summarizeTitle(text: string): string {

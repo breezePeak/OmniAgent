@@ -91,6 +91,13 @@ export interface ExtensionMessageMap {
   'omni:delete-project': { id: string };
   'omni:set-active-project': { id: string | null };
   'omni:get-active-project': Record<string, never>;
+  'omni:get-settings': Record<string, never>;
+  'omni:update-settings': {
+    injectMemory?: boolean;
+    injectSkills?: boolean;
+    injectTools?: boolean;
+    injectProject?: boolean;
+  };
   'omni:augment-prompt': { provider: SupportedProvider; prompt: string };
   'omni:insert-prompt': { message: string };
   'omni:send-message': { message: string };

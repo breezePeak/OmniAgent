@@ -37,6 +37,39 @@ test('plans github search goals into navigate + snapshot', () => {
   assert.ok(names.includes('browser.snapshot'));
 });
 
+test('uses snapshot element refs for type and click actions', () => {
+  const history = [{
+    id: 's1',
+    index: 0,
+    type: 'tool' as const,
+    title: 'snapshot',
+    toolName: 'browser.snapshot',
+    ok: true,
+    toolResult: {
+      elements: [
+        { ref: 'e1', tag: 'input', role: 'textbox', name: 'Search' },
+        { ref: 'e2', tag: 'button', role: 'button', name: 'Submit' },
+      ],
+    },
+    createdAt: Date.now(),
+  }];
+  const actions = planActions(
+    '输入 "OmniAgent" 并点击 "Submit"',
+    {
+      goal: 'demo',
+      memoryContext: '',
+      skillContext: '',
+      toolContext: '',
+      projectContext: '',
+    },
+    history,
+  );
+  const typeAction = actions.find((action) => action.toolName === 'browser.type');
+  const clickAction = actions.find((action) => action.toolName === 'browser.click');
+  assert.equal(typeAction?.toolArguments?.ref, 'e1');
+  assert.equal(clickAction?.toolArguments?.ref, 'e2');
+});
+
 test('runs a multi-step task through tools and completes', async () => {
   const calls: string[] = [];
   const runtime = new AgentRuntime({

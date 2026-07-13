@@ -52,14 +52,20 @@ export class MemoryService {
     });
   }
 
-  async extractExplicitUserMemory(content: string): Promise<MemoryRecord | null> {
+  async extractExplicitUserMemory(
+    content: string,
+    options: { projectId?: string | null } = {},
+  ): Promise<MemoryRecord | null> {
     const normalized = content.trim();
     if (!isExplicitMemory(normalized)) return null;
+    const projectId = options.projectId ?? null;
     return this.save({
       type: inferMemoryType(normalized),
       content: normalizeMemoryContent(normalized),
       importance: 0.8,
       confidence: 0.9,
+      scope: projectId ? 'project' : 'global',
+      projectId,
     });
   }
 
