@@ -5,6 +5,12 @@ import type { SupportedProvider } from '@omni-agent/shared';
 // Keep the constructor typed without relying on the unavailable named runtime export.
 const Dexie = DexieModule as unknown as DexieConstructor;
 
+function createId(): string {
+  const webCrypto = globalThis.crypto as Crypto | undefined;
+  if (webCrypto?.randomUUID) return webCrypto.randomUUID();
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 export type MemoryType = 'profile' | 'preference' | 'project' | 'episode' | 'procedure' | 'knowledge';
 export type MemoryScope = 'global' | 'provider' | 'project';
@@ -61,12 +67,53 @@ export interface MemoryRecord {
   lastAccessedAt: number | null;
 }
 
+export interface SkillRecord {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  prompt: string;
+  tools: string[];
+  permissions: string[];
+  triggers: string[];
+  workflow: string[];
+  knowledge: string[];
+  enabled: boolean;
+  source: 'builtin' | 'user';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type AgentTaskStatus =
+  | 'idle'
+  | 'planning'
+  | 'running'
+  | 'waiting_tool'
+  | 'completed'
+  | 'failed'
+  | 'stopped';
+
+export interface AgentTaskRecord {
+  id: string;
+  goal: string;
+  status: AgentTaskStatus;
+  steps: unknown[];
+  result: string | null;
+  error: string | null;
+  providerId: SupportedProvider | null;
+  projectId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export class OmniAgentDatabase extends Dexie {
   providers!: EntityTable<ProviderRecord, 'id'>;
   conversations!: EntityTable<ConversationRecord, 'id'>;
   messages!: EntityTable<MessageRecord, 'id'>;
   settings!: EntityTable<SettingRecord, 'key'>;
   memories!: EntityTable<MemoryRecord, 'id'>;
+  skills!: EntityTable<SkillRecord, 'id'>;
+  agentTasks!: EntityTable<AgentTaskRecord, 'id'>;
 
   constructor(name = 'omni-agent') {
     super(name);
@@ -82,6 +129,23 @@ export class OmniAgentDatabase extends Dexie {
       messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt',
       settings: '&key, updatedAt',
       memories: '&id, type, scope, providerId, projectId, *keywords, updatedAt',
+    });
+    this.version(3).stores({
+      providers: '&id, adapter, updatedAt',
+      conversations: '&id, providerId, externalId, [providerId+externalId], updatedAt',
+      messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt',
+      settings: '&key, updatedAt',
+      memories: '&id, type, scope, providerId, projectId, *keywords, updatedAt',
+      skills: '&id, name, enabled, source, updatedAt',
+    });
+    this.version(4).stores({
+      providers: '&id, adapter, updatedAt',
+      conversations: '&id, providerId, externalId, [providerId+externalId], updatedAt',
+      messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt',
+      settings: '&key, updatedAt',
+      memories: '&id, type, scope, providerId, projectId, *keywords, updatedAt',
+      skills: '&id, name, enabled, source, updatedAt',
+      agentTasks: '&id, status, updatedAt',
     });
   }
 }
@@ -124,7 +188,7 @@ export class OmniAgentStorage {
     }
 
     const conversation: ConversationRecord = {
-      id: crypto.randomUUID(),
+      id: createId(),
       providerId: input.providerId,
       externalId: input.externalId,
       title: input.title ?? null,
@@ -140,7 +204,7 @@ export class OmniAgentStorage {
     const now = Date.now();
     const message: MessageRecord = {
       ...input,
-      id: crypto.randomUUID(),
+      id: createId(),
       createdAt: now,
       updatedAt: now,
     };
@@ -194,7 +258,7 @@ export class OmniAgentStorage {
     const existing = input.id ? await this.db.memories.get(input.id) : undefined;
     const memory: MemoryRecord = {
       ...input,
-      id: input.id ?? crypto.randomUUID(),
+      id: input.id ?? createId(),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       lastAccessedAt: existing?.lastAccessedAt ?? null,
@@ -209,6 +273,53 @@ export class OmniAgentStorage {
 
   async markMemoryAccessed(id: string): Promise<void> {
     await this.db.memories.update(id, { lastAccessedAt: Date.now() });
+  }
+
+  async listSkills(): Promise<SkillRecord[]> {
+    return (await this.db.skills.toArray()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async saveSkill(input: Omit<SkillRecord, 'createdAt' | 'updatedAt'> & { createdAt?: number; updatedAt?: number }): Promise<SkillRecord> {
+    const now = Date.now();
+    const existing = await this.db.skills.get(input.id);
+    const skill: SkillRecord = {
+      ...input,
+      createdAt: existing?.createdAt ?? input.createdAt ?? now,
+      updatedAt: now,
+    };
+    await this.db.skills.put(skill);
+    return skill;
+  }
+
+  async deleteSkill(id: string): Promise<void> {
+    await this.db.skills.delete(id);
+  }
+
+  async getSkill(id: string): Promise<SkillRecord | undefined> {
+    return this.db.skills.get(id);
+  }
+
+  async listAgentTasks(): Promise<AgentTaskRecord[]> {
+    return (await this.db.agentTasks.toArray()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async saveAgentTask(input: AgentTaskRecord): Promise<AgentTaskRecord> {
+    const existing = await this.db.agentTasks.get(input.id);
+    const task: AgentTaskRecord = {
+      ...input,
+      createdAt: existing?.createdAt ?? input.createdAt,
+      updatedAt: Date.now(),
+    };
+    await this.db.agentTasks.put(task);
+    return task;
+  }
+
+  async getAgentTask(id: string): Promise<AgentTaskRecord | undefined> {
+    return this.db.agentTasks.get(id);
+  }
+
+  async deleteAgentTask(id: string): Promise<void> {
+    await this.db.agentTasks.delete(id);
   }
 }
 

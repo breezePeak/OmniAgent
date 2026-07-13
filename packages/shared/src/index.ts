@@ -21,6 +21,58 @@ export interface ExtensionMessageMap {
   'omni:list-messages': { conversationId: string };
   'omni:list-memories': Record<string, never>;
   'omni:save-memory': { content: string };
+  'omni:list-skills': Record<string, never>;
+  'omni:register-skill': {
+    name: string;
+    description: string;
+    prompt: string;
+    triggers?: string[];
+    tools?: string[];
+    workflow?: string[];
+  };
+  'omni:set-skill-enabled': { id: string; enabled: boolean };
+  'omni:match-skills': { query: string; limit?: number };
+  'omni:list-tools': Record<string, never>;
+  'omni:execute-tool': {
+    name: string;
+    arguments?: Record<string, unknown>;
+    providerId?: SupportedProvider;
+  };
+  'omni:browser-snapshot': {
+    includeText?: boolean;
+    maxLength?: number;
+  };
+  'omni:browser-click': {
+    selector?: string;
+    text?: string;
+    exact?: boolean;
+  };
+  'omni:browser-type': {
+    selector?: string;
+    text?: string;
+    value: string;
+    clear?: boolean;
+    submit?: boolean;
+  };
+  'omni:browser-scroll': {
+    direction?: 'up' | 'down' | 'left' | 'right';
+    amount?: number;
+    selector?: string;
+  };
+  'omni:browser-navigate': {
+    url: string;
+  };
+  'omni:list-mcp-servers': Record<string, never>;
+  'omni:list-agent-tasks': Record<string, never>;
+  'omni:get-agent-task': { taskId: string };
+  'omni:create-agent-task': {
+    goal: string;
+    providerId?: SupportedProvider;
+  };
+  'omni:run-agent-task': { taskId: string };
+  'omni:pause-agent-task': { taskId: string };
+  'omni:resume-agent-task': { taskId: string };
+  'omni:delete-agent-task': { taskId: string };
   'omni:augment-prompt': { provider: SupportedProvider; prompt: string };
   'omni:insert-prompt': { message: string };
   'omni:send-message': { message: string };

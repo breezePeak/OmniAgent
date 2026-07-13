@@ -1,1 +1,15 @@
-{ "name": "@omni-agent/mcp", "version": "0.1.0", "private": true, "type": "module", "exports": { ".": "./src/index.ts" }, "scripts": { "typecheck": "tsc --noEmit" }, "devDependencies": { "typescript": "^5.9.3" } }
+{
+  "name": "@omni-agent/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "tsx --test test/mcp.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -28,3 +28,13 @@ h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .memory-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
 .memory-list li { padding: 10px; border-radius: 8px; background: #f8fafc; }
 .memory-list p { margin: 4px 0 0; color: #334155; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.skill-input { margin-top: 10px; }
+.skill-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
+.skill-list li { padding: 10px; border-radius: 8px; background: #f8fafc; }
+.skill-item-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.skill-item-header strong { display: block; margin-top: 2px; font-size: 13px; }
+.skill-list p { margin: 6px 0 0; color: #334155; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.skill-triggers { color: #64748b !important; font-size: 12px !important; }
+.capability-card .response-text { margin-top: 8px; }
+.agent-actions { display: flex; gap: 8px; margin-top: 12px; }
+.agent-actions .el-button { flex: 1; }

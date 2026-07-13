@@ -1,10 +1,21 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { OmniAgentDatabase, OmniAgentStorage } from '../src/index.js';
 
+if (typeof globalThis.CustomEvent === 'undefined') {
+  globalThis.CustomEvent = class CustomEvent<T = unknown> extends Event {
+    readonly detail: T;
+    constructor(type: string, params?: CustomEventInit<T>) {
+      super(type, params);
+      this.detail = params?.detail as T;
+    }
+  } as typeof CustomEvent;
+}
+
 function createStorage() {
-  return new OmniAgentStorage(new OmniAgentDatabase(`omni-agent-test-${crypto.randomUUID()}`));
+  return new OmniAgentStorage(new OmniAgentDatabase(`omni-agent-test-${randomUUID()}`));
 }
 
 test('stores providers, conversations, messages, and settings locally', async (t) => {
@@ -44,13 +55,46 @@ test('stores providers, conversations, messages, and settings locally', async (t
     attachments: [],
   });
   await storage.setSetting('theme', 'dark');
+  await storage.saveSkill({
+    id: 'concise-reply',
+    name: 'concise-reply',
+    version: '1.0.0',
+    description: '简洁回复',
+    prompt: '请简洁回答',
+    tools: [],
+    permissions: [],
+    triggers: ['简洁'],
+    workflow: [],
+    knowledge: [],
+    enabled: true,
+    source: 'builtin',
+  });
 
   const conversations = await storage.listConversations('deepseek');
   const messages = await storage.listMessages(conversation.id);
+  const skills = await storage.listSkills();
 
   assert.equal(conversations.length, 1);
   assert.equal(conversations[0]?.externalId, 'session-1');
   assert.equal(messages.length, 2);
   assert.equal(messages[1]?.content, '流式回复完成');
   assert.equal(await storage.getSetting('theme'), 'dark');
+  assert.equal(skills.length, 1);
+  assert.equal(skills[0]?.name, 'concise-reply');
+
+  await storage.saveAgentTask({
+    id: 'task-1',
+    goal: '测试任务',
+    status: 'completed',
+    steps: [{ id: 's1', index: 0, type: 'finish', title: 'done', createdAt: Date.now() }],
+    result: 'ok',
+    error: null,
+    providerId: 'deepseek',
+    projectId: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  const tasks = await storage.listAgentTasks();
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0]?.goal, '测试任务');
 });

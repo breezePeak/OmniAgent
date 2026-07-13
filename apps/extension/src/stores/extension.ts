@@ -1,7 +1,19 @@
 import { defineStore } from 'pinia';
 import type { AdapterStatus, ConversationTurn, ExtensionMessage, ExtensionMessageMap } from '@omni-agent/shared';
-import type { ConversationRecord, MessageRecord } from '@omni-agent/storage';
-import type { MemoryRecord } from '@omni-agent/storage';
+import type { ConversationRecord, MessageRecord, MemoryRecord } from '@omni-agent/storage';
+import type { SkillDefinition } from '@omni-agent/skills';
+import type { ToolDescriptor, ToolResult } from '@omni-agent/tools';
+import type { AgentTask } from '@omni-agent/agent-core';
+
+interface McpServerSummary {
+  id: string;
+  name: string;
+  kind: string;
+  enabled: boolean;
+  toolCount: number;
+  tools: string[];
+  connectedAt: number;
+}
 
 interface MemoryInjectionDiagnostic {
   stage: string;
@@ -36,6 +48,27 @@ export const useExtensionStore = defineStore('extension', {
     memoryLoading: false,
     memoryError: '',
     memoryDiagnostic: null as MemoryInjectionDiagnostic | null,
+    skills: [] as SkillDefinition[],
+    skillDraftName: '',
+    skillDraftDescription: '',
+    skillDraftPrompt: '',
+    skillDraftTriggers: '',
+    skillLoading: false,
+    skillError: '',
+    tools: [] as ToolDescriptor[],
+    selectedToolName: '',
+    toolArgumentJson: '{\n  "query": ""\n}',
+    lastToolResult: null as ToolResult | null,
+    toolLoading: false,
+    toolError: '',
+    mcpServers: [] as McpServerSummary[],
+    mcpLoading: false,
+    mcpError: '',
+    agentTasks: [] as AgentTask[],
+    selectedAgentTaskId: '',
+    agentGoalDraft: '',
+    agentLoading: false,
+    agentError: '',
     listening: false,
   }),
   actions: {
@@ -75,7 +108,7 @@ export const useExtensionStore = defineStore('extension', {
       const turn = await browser.runtime.sendMessage<ExtensionMessage<'omni:conversation-snapshot'>, ConversationTurn | null | undefined>({
         type: 'omni:conversation-snapshot',
       });
-      if (!turn) throw new Error('Content Script 未返回问答数据，请刷新 DeepSeek 页面');
+      if (!turn) throw new Error('Content Script 未返回问答数据，请刷新 DeepSeek/Kimi 页面');
       this.latestQuestion = turn.question;
       this.latestResponse = turn.response;
       this.conversationError = '';
@@ -91,7 +124,7 @@ export const useExtensionStore = defineStore('extension', {
           payload: { message },
         });
       } catch (error) {
-        this.insertError = error instanceof Error ? error.message : '写入 DeepSeek 输入框失败';
+        this.insertError = error instanceof Error ? error.message : '写入输入框失败';
       } finally {
         this.inserting = false;
       }
@@ -154,6 +187,228 @@ export const useExtensionStore = defineStore('extension', {
         this.memoryError = error instanceof Error ? error.message : '保存记忆失败';
       } finally {
         this.memoryLoading = false;
+      }
+    },
+    async refreshSkills() {
+      this.skillLoading = true;
+      try {
+        this.skills = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-skills'>, SkillDefinition[]>({
+          type: 'omni:list-skills',
+        });
+        this.skillError = '';
+      } catch (error) {
+        this.skillError = error instanceof Error ? error.message : '读取 Skill 失败';
+      } finally {
+        this.skillLoading = false;
+      }
+    },
+    async registerSkill() {
+      const name = this.skillDraftName.trim();
+      const prompt = this.skillDraftPrompt.trim();
+      if (!name || !prompt) return;
+      this.skillLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:register-skill'>, SkillDefinition>({
+          type: 'omni:register-skill',
+          payload: {
+            name,
+            description: this.skillDraftDescription.trim() || name,
+            prompt,
+            triggers: this.skillDraftTriggers
+              .split(/[,，]/u)
+              .map((item) => item.trim())
+              .filter(Boolean),
+          },
+        });
+        this.skillDraftName = '';
+        this.skillDraftDescription = '';
+        this.skillDraftPrompt = '';
+        this.skillDraftTriggers = '';
+        await this.refreshSkills();
+      } catch (error) {
+        this.skillError = error instanceof Error ? error.message : '注册 Skill 失败';
+      } finally {
+        this.skillLoading = false;
+      }
+    },
+    async setSkillEnabled(id: string, enabled: boolean) {
+      this.skillLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:set-skill-enabled'>, SkillDefinition>({
+          type: 'omni:set-skill-enabled',
+          payload: { id, enabled },
+        });
+        await this.refreshSkills();
+      } catch (error) {
+        this.skillError = error instanceof Error ? error.message : '更新 Skill 失败';
+      } finally {
+        this.skillLoading = false;
+      }
+    },
+    async refreshTools() {
+      this.toolLoading = true;
+      try {
+        this.tools = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-tools'>, ToolDescriptor[]>({
+          type: 'omni:list-tools',
+        });
+        if (!this.tools.some((tool) => tool.name === this.selectedToolName)) {
+          this.selectedToolName = this.tools[0]?.name ?? '';
+          this.syncToolArgumentTemplate();
+        }
+        this.toolError = '';
+      } catch (error) {
+        this.toolError = error instanceof Error ? error.message : '读取工具失败';
+      } finally {
+        this.toolLoading = false;
+      }
+    },
+    selectTool(name: string) {
+      this.selectedToolName = name;
+      this.syncToolArgumentTemplate();
+    },
+    syncToolArgumentTemplate() {
+      const tool = this.tools.find((item) => item.name === this.selectedToolName);
+      if (!tool) {
+        this.toolArgumentJson = '{}';
+        return;
+      }
+      const draft: Record<string, unknown> = {};
+      for (const parameter of tool.parameters) {
+        if (parameter.type === 'number') draft[parameter.name] = 0;
+        else if (parameter.type === 'boolean') draft[parameter.name] = true;
+        else if (parameter.type === 'array') draft[parameter.name] = [];
+        else if (parameter.type === 'object') draft[parameter.name] = {};
+        else draft[parameter.name] = '';
+      }
+      this.toolArgumentJson = JSON.stringify(draft, null, 2);
+    },
+    async executeSelectedTool() {
+      if (!this.selectedToolName) return;
+      this.toolLoading = true;
+      this.toolError = '';
+      try {
+        let args: Record<string, unknown> = {};
+        const raw = this.toolArgumentJson.trim();
+        if (raw) {
+          args = JSON.parse(raw) as Record<string, unknown>;
+        }
+        this.lastToolResult = await browser.runtime.sendMessage<ExtensionMessage<'omni:execute-tool'>, ToolResult>({
+          type: 'omni:execute-tool',
+          payload: {
+            name: this.selectedToolName,
+            arguments: args,
+            providerId: this.adapter.provider ?? undefined,
+          },
+        });
+        if (this.selectedToolName.startsWith('memory.')) await this.refreshMemories();
+      } catch (error) {
+        this.toolError = error instanceof Error ? error.message : '执行工具失败';
+        this.lastToolResult = null;
+      } finally {
+        this.toolLoading = false;
+      }
+    },
+    async refreshMcpServers() {
+      this.mcpLoading = true;
+      try {
+        this.mcpServers = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-mcp-servers'>, McpServerSummary[]>({
+          type: 'omni:list-mcp-servers',
+        });
+        this.mcpError = '';
+      } catch (error) {
+        this.mcpError = error instanceof Error ? error.message : '读取 MCP 失败';
+      } finally {
+        this.mcpLoading = false;
+      }
+    },
+    async refreshAgentTasks() {
+      this.agentLoading = true;
+      try {
+        this.agentTasks = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-agent-tasks'>, AgentTask[]>({
+          type: 'omni:list-agent-tasks',
+        });
+        if (!this.agentTasks.some((task) => task.id === this.selectedAgentTaskId)) {
+          this.selectedAgentTaskId = this.agentTasks[0]?.id ?? '';
+        }
+        this.agentError = '';
+      } catch (error) {
+        this.agentError = error instanceof Error ? error.message : '读取 Agent 任务失败';
+      } finally {
+        this.agentLoading = false;
+      }
+    },
+    async createAndRunAgentTask() {
+      const goal = this.agentGoalDraft.trim();
+      if (!goal) return;
+      this.agentLoading = true;
+      this.agentError = '';
+      try {
+        const created = await browser.runtime.sendMessage<ExtensionMessage<'omni:create-agent-task'>, AgentTask>({
+          type: 'omni:create-agent-task',
+          payload: {
+            goal,
+            providerId: this.adapter.provider ?? undefined,
+          },
+        });
+        const finished = await browser.runtime.sendMessage<ExtensionMessage<'omni:run-agent-task'>, AgentTask>({
+          type: 'omni:run-agent-task',
+          payload: { taskId: created.id },
+        });
+        this.selectedAgentTaskId = finished.id;
+        this.agentGoalDraft = '';
+        await this.refreshAgentTasks();
+        await this.refreshMemories();
+        await this.refreshTools();
+      } catch (error) {
+        this.agentError = error instanceof Error ? error.message : '执行 Agent 任务失败';
+      } finally {
+        this.agentLoading = false;
+      }
+    },
+    async pauseSelectedAgentTask() {
+      if (!this.selectedAgentTaskId) return;
+      this.agentLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:pause-agent-task'>, AgentTask>({
+          type: 'omni:pause-agent-task',
+          payload: { taskId: this.selectedAgentTaskId },
+        });
+        await this.refreshAgentTasks();
+      } catch (error) {
+        this.agentError = error instanceof Error ? error.message : '暂停任务失败';
+      } finally {
+        this.agentLoading = false;
+      }
+    },
+    async resumeSelectedAgentTask() {
+      if (!this.selectedAgentTaskId) return;
+      this.agentLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:resume-agent-task'>, AgentTask>({
+          type: 'omni:resume-agent-task',
+          payload: { taskId: this.selectedAgentTaskId },
+        });
+        await this.refreshAgentTasks();
+      } catch (error) {
+        this.agentError = error instanceof Error ? error.message : '恢复任务失败';
+      } finally {
+        this.agentLoading = false;
+      }
+    },
+    async deleteSelectedAgentTask() {
+      if (!this.selectedAgentTaskId) return;
+      this.agentLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:delete-agent-task'>, { ok: boolean }>({
+          type: 'omni:delete-agent-task',
+          payload: { taskId: this.selectedAgentTaskId },
+        });
+        this.selectedAgentTaskId = '';
+        await this.refreshAgentTasks();
+      } catch (error) {
+        this.agentError = error instanceof Error ? error.message : '删除任务失败';
+      } finally {
+        this.agentLoading = false;
       }
     },
   },

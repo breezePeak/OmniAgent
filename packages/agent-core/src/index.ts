@@ -1,2 +1,12 @@
-/** Platform-neutral Agent runtime boundary. Implementation begins after phase one. */
-export {};
+export type {
+  AgentContext,
+  AgentDependencies,
+  AgentStatus,
+  AgentStep,
+  AgentTask,
+  CreateTaskInput,
+  PlannedAction,
+} from './types.js';
+export { ContextBuilder, type ContextSources } from './context.js';
+export { planActions } from './planner.js';
+export { AgentRuntime } from './runtime.js';

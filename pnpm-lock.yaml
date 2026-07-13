@@ -13,6 +13,15 @@ importers:
       '@element-plus/icons-vue':
         specifier: ^2.3.1
         version: 2.3.2(vue@3.5.39(typescript@5.9.3))
+      '@omni-agent/agent-core':
+        specifier: workspace:*
+        version: link:../../packages/agent-core
+      '@omni-agent/browser-agent':
+        specifier: workspace:*
+        version: link:../../packages/browser-agent
+      '@omni-agent/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@omni-agent/memory':
         specifier: workspace:*
         version: link:../../packages/memory
@@ -22,9 +31,15 @@ importers:
       '@omni-agent/site-adapters':
         specifier: workspace:*
         version: link:../../packages/site-adapters
+      '@omni-agent/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       '@omni-agent/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@omni-agent/tools':
+        specifier: workspace:*
+        version: link:../../packages/tools
       '@wxt-dev/module-vue':
         specifier: ^1.0.3
         version: 1.0.3(vite@8.1.4(@types/node@26.1.1)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.0))(vue@3.5.39(typescript@5.9.3))(wxt@0.20.27(@types/node@26.1.1)(jiti@2.7.0)(rolldown@1.1.5)(tsx@4.23.0))
@@ -53,18 +68,27 @@ importers:
 
   packages/agent-core:
     devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   packages/browser-agent:
     devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
 
   packages/mcp:
     devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -105,7 +129,17 @@ importers:
         version: 5.9.3
 
   packages/skills:
+    dependencies:
+      '@omni-agent/storage':
+        specifier: workspace:*
+        version: link:../storage
     devDependencies:
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -131,6 +165,9 @@ importers:
 
   packages/tools:
     devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

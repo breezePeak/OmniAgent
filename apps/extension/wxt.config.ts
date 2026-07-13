@@ -5,7 +5,8 @@ export default defineConfig({
   manifest: {
     name: 'OmniAgent',
     description: 'One memory. Every AI.',
-    permissions: ['storage', 'sidePanel', 'tabs'],
+    permissions: ['storage', 'sidePanel', 'tabs', 'scripting'],
+    host_permissions: ['*://*/*'],
     action: {
       default_title: 'Open OmniAgent',
     },

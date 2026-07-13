@@ -1,16 +1,21 @@
 import { BrowserPageController } from '@omni-agent/browser-agent';
-import { createAdapterRegistry, deepseekAdapter, providerFromAdapter } from '@omni-agent/site-adapters';
+import { createAdapterRegistry, kimiAdapter, providerFromAdapter } from '@omni-agent/site-adapters';
 import type { AdapterStatus, ExtensionMessage, ExtensionMessageMap } from '@omni-agent/shared';
 import { installMainWorldBridge } from '../src/content/main-world-bridge';
 
-const adapters = createAdapterRegistry([deepseekAdapter]);
+const adapters = createAdapterRegistry([kimiAdapter]);
 const pageController = new BrowserPageController();
 
 export default defineContentScript({
-  matches: ['*://chat.deepseek.com/*'],
+  matches: [
+    '*://kimi.com/*',
+    '*://www.kimi.com/*',
+    '*://kimi.moonshot.cn/*',
+    '*://www.kimi.moonshot.cn/*',
+  ],
   runAt: 'document_start',
   main(ctx) {
-    const disposeBridge = installMainWorldBridge('deepseek');
+    const disposeBridge = installMainWorldBridge('kimi');
     const adapter = adapters.find(window.location.href);
     const status = (): AdapterStatus => ({
       provider: providerFromAdapter(adapter),
@@ -48,13 +53,14 @@ export default defineContentScript({
       }
       return undefined;
     };
+
     browser.runtime.onMessage.addListener(handleMessage);
 
     const stopObserving = adapter?.observeMessages(({ id, role, text }) => {
       void browser.runtime.sendMessage<ExtensionMessage<'omni:response-update'>>({
         type: 'omni:response-update',
         payload: {
-          provider: providerFromAdapter(adapter) ?? 'deepseek',
+          provider: providerFromAdapter(adapter) ?? 'kimi',
           role,
           text,
           messageId: id,

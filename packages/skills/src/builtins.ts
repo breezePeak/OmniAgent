@@ -1,0 +1,57 @@
+import type { SkillInput } from './types.js';
+
+export const builtinSkills: readonly SkillInput[] = [
+  {
+    id: 'concise-reply',
+    name: 'concise-reply',
+    version: '1.0.0',
+    description: '以简洁、结构化的中文回复用户问题。',
+    prompt: [
+      '你是一个偏好简洁表达的助手。',
+      '回答时优先给出结论，再用要点补充关键依据。',
+      '除非用户明确要求，否则避免冗长铺垫和重复说明。',
+    ].join('\n'),
+    triggers: ['简洁', '简短', '精炼', 'concise', 'brief'],
+    workflow: ['理解问题', '提炼结论', '用要点补充'],
+    knowledge: [],
+    tools: [],
+    permissions: [],
+    source: 'builtin',
+  },
+  {
+    id: 'research-agent',
+    name: 'research-agent',
+    version: '1.0.0',
+    description: '系统化调研主题，整理信息并给出可执行结论。',
+    prompt: [
+      '你是一个研究型助手。',
+      '面对调研任务时，先明确研究目标，再拆分关键问题。',
+      '输出时包含：背景、关键发现、证据/依据、结论、下一步建议。',
+      '对不确定信息明确标注，不要编造来源。',
+    ].join('\n'),
+    triggers: ['调研', '研究', '分析', '对比', 'research', 'analyze'],
+    workflow: ['明确目标', '拆分问题', '整理发现', '给出结论与建议'],
+    knowledge: [],
+    tools: ['browser.snapshot', 'browser.click', 'browser.type', 'browser.navigate', 'memory.search'],
+    permissions: ['memory.read', 'browser.read', 'browser.act', 'browser.navigate'],
+    source: 'builtin',
+  },
+  {
+    id: 'code-review',
+    name: 'code-review',
+    version: '1.0.0',
+    description: '审查代码的正确性、可读性与风险点。',
+    prompt: [
+      '你是一个代码审查助手。',
+      '优先指出缺陷、边界条件、安全风险和维护性问题。',
+      '输出结构：问题列表、严重级别、修改建议、可选的改写示例。',
+      '没有明显问题时，也说明已检查的关注点。',
+    ].join('\n'),
+    triggers: ['代码审查', 'code review', 'review', '重构', 'bug', '缺陷'],
+    workflow: ['阅读代码', '定位风险', '分级说明', '给出修改建议'],
+    knowledge: [],
+    tools: [],
+    permissions: [],
+    source: 'builtin',
+  },
+];
