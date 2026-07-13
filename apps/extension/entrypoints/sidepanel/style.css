@@ -7,6 +7,13 @@ body { margin: 0; min-width: 320px; }
 .eyebrow { margin: 0 0 8px; color: #64748b; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
 h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .description { color: #64748b; }
+.active-project { margin: 8px 0 0; color: #0f766e; font-size: 12px; font-weight: 600; }
+.active-project.muted { color: #94a3b8; font-weight: 500; }
+.overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
+.overview-card { padding: 10px 8px; border-radius: 10px; background: #f1f5f9; text-align: center; }
+.overview-card strong { display: block; font-size: 18px; color: #0f172a; }
+.overview-card span { color: #64748b; font-size: 11px; letter-spacing: .04em; }
+.preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .detected-host { margin: 12px 0 0; color: #64748b; font-size: 12px; overflow-wrap: anywhere; }
 .refresh { margin-top: 16px; }
 .capability-card { margin-top: 24px; padding-top: 20px; border-top: 1px solid #e5e7eb; }

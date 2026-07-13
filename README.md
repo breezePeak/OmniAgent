@@ -82,6 +82,8 @@ pnpm --filter @omni-agent/storage test
 - 记忆支持搜索与类型过滤；会话可按平台/活动项目过滤
 - Tool Runtime 会记录最近执行历史，可一键重跑
 - Agent 任务支持暂停/恢复/删除/状态过滤，运行中自动刷新步骤
+- SidePanel 顶部展示记忆/Skill/工具/任务/会话/项目统计，以及活动项目
+- Agent 区提供常用目标快捷预设
 - Agent 示例目标：
   - `请记住：我喜欢简洁回复，并搜索记忆 简洁`
   - `打开 https://github.com 并抓取页面快照`

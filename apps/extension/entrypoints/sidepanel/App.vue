@@ -49,6 +49,27 @@ function summarizeHistory(value: unknown): string {
 const selectedAgentTask = computed(
   () => extension.agentTasks.find((task) => task.id === extension.selectedAgentTaskId) ?? null,
 );
+const activeProject = computed(
+  () => extension.projects.find((project) => project.id === extension.activeProjectId) ?? null,
+);
+const overviewStats = computed(() => [
+  { label: '记忆', value: extension.memoryTotalCount },
+  { label: 'Skill', value: extension.skills.length },
+  { label: '工具', value: extension.tools.length },
+  { label: '任务', value: extension.agentTaskTotalCount },
+  { label: '会话', value: extension.savedConversations.length },
+  { label: '项目', value: extension.projects.length },
+]);
+const agentPresets = [
+  '请记住：我喜欢简洁的中文回复，并搜索记忆 简洁',
+  '打开 https://github.com 并抓取页面快照',
+  '在 GitHub 搜索 OmniAgent',
+  '输入 "OmniAgent" 并点击 "Submit"',
+];
+
+function applyAgentPreset(goal: string) {
+  extension.agentGoalDraft = goal;
+}
 
 onMounted(() => {
   extension.startResponseListener();
@@ -77,6 +98,14 @@ onUnmounted(() => {
       <p class="eyebrow">OMNIAGENT</p>
       <h1>One memory.<br />Every AI.</h1>
       <p class="description">{{ status }}</p>
+      <p v-if="activeProject" class="active-project">活动项目：{{ activeProject.name }}</p>
+      <p v-else class="active-project muted">未设置活动项目</p>
+      <div class="overview-grid">
+        <div v-for="item in overviewStats" :key="item.label" class="overview-card">
+          <strong>{{ item.value }}</strong>
+          <span>{{ item.label }}</span>
+        </div>
+      </div>
     </section>
     <el-alert
       :title="provider"
@@ -543,6 +572,17 @@ onUnmounted(() => {
         :rows="3"
         placeholder="例如：请记住：我喜欢简洁回复，并搜索记忆 简洁"
       />
+      <div class="preset-row">
+        <el-button
+          v-for="preset in agentPresets"
+          :key="preset"
+          size="small"
+          plain
+          @click="applyAgentPreset(preset)"
+        >
+          {{ preset.length > 18 ? `${preset.slice(0, 18)}...` : preset }}
+        </el-button>
+      </div>
       <el-button
         class="primary-action"
         type="primary"

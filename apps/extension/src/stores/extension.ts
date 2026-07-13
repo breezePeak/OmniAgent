@@ -57,6 +57,7 @@ export const useExtensionStore = defineStore('extension', {
     backupError: '',
     backupMessage: '',
     memories: [] as MemoryRecord[],
+    memoryTotalCount: 0,
     memoryDraft: '',
     memoryQuery: '',
     memoryTypeFilter: '' as '' | MemoryRecord['type'],
@@ -94,6 +95,7 @@ export const useExtensionStore = defineStore('extension', {
     mcpLoading: false,
     mcpError: '',
     agentTasks: [] as AgentTask[],
+    agentTaskTotalCount: 0,
     selectedAgentTaskId: '',
     agentStatusFilter: '' as '' | AgentTask['status'],
     agentGoalDraft: '',
@@ -228,6 +230,10 @@ export const useExtensionStore = defineStore('extension', {
     async refreshMemories() {
       this.memoryLoading = true;
       try {
+        const allMemories = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-memories'>, MemoryRecord[]>({
+          type: 'omni:list-memories',
+        });
+        this.memoryTotalCount = allMemories.length;
         if (this.memoryQuery.trim()) {
           this.memories = await browser.runtime.sendMessage<
             ExtensionMessage<'omni:search-memories'>,
@@ -512,6 +518,7 @@ export const useExtensionStore = defineStore('extension', {
           type: 'omni:clear-memories',
         });
         this.memories = [];
+        this.memoryTotalCount = 0;
       } catch (error) {
         this.memoryError = error instanceof Error ? error.message : '清空记忆失败';
       } finally {
@@ -540,6 +547,7 @@ export const useExtensionStore = defineStore('extension', {
           type: 'omni:clear-agent-tasks',
         });
         this.agentTasks = [];
+        this.agentTaskTotalCount = 0;
         this.selectedAgentTaskId = '';
       } catch (error) {
         this.agentError = error instanceof Error ? error.message : '清空任务失败';
@@ -566,6 +574,7 @@ export const useExtensionStore = defineStore('extension', {
         const tasks = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-agent-tasks'>, AgentTask[]>({
           type: 'omni:list-agent-tasks',
         });
+        this.agentTaskTotalCount = tasks.length;
         this.agentTasks = this.agentStatusFilter
           ? tasks.filter((task) => task.status === this.agentStatusFilter)
           : tasks;
