@@ -382,7 +382,10 @@ onMounted(() => {
       </div>
       <div v-if="extension.toolHistory.length" class="message-history">
         <article v-for="item in extension.toolHistory.slice(0, 8)" :key="item.id" class="stored-message" :data-role="item.ok ? 'user' : 'assistant'">
-          <span class="message-role">{{ item.ok ? 'ok' : 'failed' }} · {{ item.name }} · {{ item.durationMs }}ms</span>
+          <div class="skill-item-header">
+            <span class="message-role">{{ item.ok ? 'ok' : 'failed' }} · {{ item.name }} · {{ item.durationMs }}ms</span>
+            <el-button text size="small" :loading="extension.toolLoading" @click="extension.rerunToolHistory(item)">重跑</el-button>
+          </div>
           <p>{{ item.error || summarizeHistory(item.result) }}</p>
         </article>
       </div>

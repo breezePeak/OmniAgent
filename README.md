@@ -78,11 +78,15 @@ pnpm --filter @omni-agent/storage test
 - 在对话中说「请记住：...」可自动写入长期记忆
 - SidePanel 可管理记忆、Skill、工具、MCP、Agent 任务、项目
 - 注入设置可开关 Memory / Skill / Tools / Project
-- 备份区支持导出/导入记忆、Skill、项目与设置
+- 备份区支持导出/导入记忆、Skill、项目、会话消息、Agent 任务与设置
+- 记忆支持搜索与类型过滤；会话可按平台/活动项目过滤
+- Tool Runtime 会记录最近执行历史，可一键重跑
+- Agent 任务支持暂停/恢复/删除/状态过滤，运行中自动刷新步骤
 - Agent 示例目标：
   - `请记住：我喜欢简洁回复，并搜索记忆 简洁`
   - `打开 https://github.com 并抓取页面快照`
   - `在 GitHub 搜索 OmniAgent`
+  - `输入 "OmniAgent" 并点击 "Submit"`
 
 ## 路线图
 

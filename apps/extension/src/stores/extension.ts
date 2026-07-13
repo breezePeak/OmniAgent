@@ -436,6 +436,14 @@ export const useExtensionStore = defineStore('extension', {
         this.toolLoading = false;
       }
     },
+    async rerunToolHistory(item: {
+      name: string;
+      arguments?: Record<string, unknown>;
+    }) {
+      this.selectedToolName = item.name;
+      this.toolArgumentJson = JSON.stringify(item.arguments ?? {}, null, 2);
+      await this.executeSelectedTool();
+    },
     selectTool(name: string) {
       this.selectedToolName = name;
       this.syncToolArgumentTemplate();
