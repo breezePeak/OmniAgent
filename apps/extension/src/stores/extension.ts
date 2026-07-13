@@ -115,6 +115,7 @@ export const useExtensionStore = defineStore('extension', {
     settingsLoading: false,
     settingsError: '',
     listening: false,
+    diagnosticPollTimer: null as ReturnType<typeof setInterval> | null,
   }),
   actions: {
     startResponseListener() {
@@ -125,8 +126,21 @@ export const useExtensionStore = defineStore('extension', {
         const payload = message.payload as ExtensionMessageMap['omni:response-update'] | undefined;
         if (payload?.role === 'user') this.latestQuestion = payload.text;
         if (payload?.role === 'assistant') this.latestResponse = payload.text;
+        void this.refreshMemoryDiagnostic();
+        void this.refreshSavedConversations();
         return undefined;
       });
+    },
+    startDiagnosticPolling() {
+      if (this.diagnosticPollTimer) return;
+      this.diagnosticPollTimer = setInterval(() => {
+        void this.refreshMemoryDiagnostic();
+      }, 2_000);
+    },
+    stopDiagnosticPolling() {
+      if (!this.diagnosticPollTimer) return;
+      clearInterval(this.diagnosticPollTimer);
+      this.diagnosticPollTimer = null;
     },
     async refreshAdapter() {
       try {
@@ -771,6 +785,19 @@ export const useExtensionStore = defineStore('extension', {
         this.backupError = error instanceof Error ? error.message : '导出失败';
       } finally {
         this.backupLoading = false;
+      }
+    },
+    async copyExportJson() {
+      if (!this.backupJson.trim()) {
+        this.backupError = '没有可复制的导出内容';
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(this.backupJson);
+        this.backupMessage = '已复制导出 JSON 到剪贴板';
+        this.backupError = '';
+      } catch (error) {
+        this.backupError = error instanceof Error ? error.message : '复制失败';
       }
     },
     async importData() {

@@ -203,7 +203,8 @@ export class OmniAgentStorage {
       const conversation = {
         ...existing,
         title: input.title ?? existing.title,
-        projectId: input.projectId ?? existing.projectId,
+        // Only attach an unbound conversation to the active project; never reassign.
+        projectId: existing.projectId ?? input.projectId ?? null,
         updatedAt: now,
       };
       await this.db.conversations.put(conversation);

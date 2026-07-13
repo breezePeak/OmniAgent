@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
 import type { ToolResult } from '@omni-agent/tools';
 import { useExtensionStore } from '../../src/stores/extension';
 
@@ -52,6 +52,7 @@ const selectedAgentTask = computed(
 
 onMounted(() => {
   extension.startResponseListener();
+  extension.startDiagnosticPolling();
   extension.refreshAdapter();
   extension.refreshSavedConversations();
   extension.refreshMemories();
@@ -62,6 +63,11 @@ onMounted(() => {
   extension.refreshAgentTasks();
   extension.refreshProjects();
   extension.refreshSettings();
+});
+
+onUnmounted(() => {
+  extension.stopDiagnosticPolling();
+  extension.stopAgentPolling();
 });
 </script>
 
@@ -406,6 +412,7 @@ onMounted(() => {
       />
       <div class="agent-actions">
         <el-button :loading="extension.backupLoading" @click="extension.exportData">导出数据</el-button>
+        <el-button :disabled="!extension.backupJson.trim()" @click="extension.copyExportJson">复制 JSON</el-button>
         <el-button type="primary" :loading="extension.backupLoading" :disabled="!extension.backupJson.trim()" @click="extension.importData">
           导入数据
         </el-button>

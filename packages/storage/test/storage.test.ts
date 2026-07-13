@@ -122,6 +122,13 @@ test('stores providers, conversations, messages, and settings locally', async (t
     projectId: 'project-1',
   });
   assert.equal(projectConversation.projectId, 'project-1');
+  // Existing project binding should not be overwritten by a later active project.
+  const rebound = await storage.getOrCreateConversation({
+    providerId: 'kimi',
+    externalId: 'kimi-1',
+    projectId: 'project-2',
+  });
+  assert.equal(rebound.projectId, 'project-1');
   assert.equal((await storage.listConversations('kimi', 'project-1')).length, 1);
   assert.equal((await storage.listConversations('deepseek', 'project-1')).length, 0);
 
