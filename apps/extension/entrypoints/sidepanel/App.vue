@@ -188,6 +188,37 @@ onMounted(() => {
         注入诊断：{{ extension.memoryDiagnostic.detail }}
         <template v-if="extension.memoryDiagnostic.stage === 'memory-retrieved'">（{{ extension.memoryDiagnostic.count }} 条）</template>
       </p>
+      <div class="filter-row">
+        <el-input
+          v-model="extension.memoryQuery"
+          class="filter-select"
+          clearable
+          placeholder="搜索记忆"
+          @keyup.enter="extension.refreshMemories"
+          @clear="extension.refreshMemories"
+        />
+        <el-button :loading="extension.memoryLoading" @click="extension.refreshMemories">搜索</el-button>
+      </div>
+      <div class="filter-row">
+        <el-select
+          v-model="extension.memoryTypeFilter"
+          class="filter-select"
+          clearable
+          placeholder="全部类型"
+          @change="extension.refreshMemories"
+        >
+          <el-option label="profile" value="profile" />
+          <el-option label="preference" value="preference" />
+          <el-option label="project" value="project" />
+          <el-option label="knowledge" value="knowledge" />
+          <el-option label="episode" value="episode" />
+          <el-option label="procedure" value="procedure" />
+        </el-select>
+        <label class="filter-check">
+          <el-switch v-model="extension.memoryProjectOnly" size="small" @change="extension.refreshMemories" />
+          <span>含活动项目</span>
+        </label>
+      </div>
       <el-input
         v-model="extension.memoryDraft"
         class="memory-input"
@@ -202,7 +233,7 @@ onMounted(() => {
       <ul v-if="extension.memories.length" class="memory-list">
         <li v-for="memory in extension.memories" :key="memory.id">
           <div class="skill-item-header">
-            <span class="message-role">{{ memory.type }}</span>
+            <span class="message-role">{{ memory.type }} · {{ memory.scope }}</span>
             <el-button text type="danger" size="small" @click="extension.deleteMemory(memory.id)">删除</el-button>
           </div>
           <p>{{ memory.summary }}</p>
@@ -500,8 +531,18 @@ onMounted(() => {
         <p class="detected-host">状态：{{ selectedAgentTask.status }}</p>
         <p v-if="selectedAgentTask.result" class="response-text">结果：{{ selectedAgentTask.result }}</p>
         <p v-if="selectedAgentTask.error" class="response-text">错误：{{ selectedAgentTask.error }}</p>
-        <article v-for="step in selectedAgentTask.steps" :key="step.id" class="stored-message">
-          <span class="message-role">#{{ step.index }} {{ step.type }}</span>
+        <article
+          v-for="step in selectedAgentTask.steps"
+          :key="step.id"
+          class="stored-message"
+          :data-role="step.ok === false ? 'assistant' : step.type === 'tool' ? 'user' : 'system'"
+        >
+          <span class="message-role">
+            #{{ step.index }} {{ step.type }}
+            <template v-if="step.toolName"> · {{ step.toolName }}</template>
+            <template v-if="step.ok === true"> · ok</template>
+            <template v-if="step.ok === false"> · failed</template>
+          </span>
           <p>{{ step.title }}</p>
           <p v-if="step.detail" class="skill-triggers">{{ step.detail }}</p>
         </article>

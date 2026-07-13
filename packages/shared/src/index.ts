@@ -21,7 +21,8 @@ export interface ExtensionMessageMap {
   'omni:list-messages': { conversationId: string };
   'omni:export-data': Record<string, never>;
   'omni:import-data': { payload: string };
-  'omni:list-memories': Record<string, never>;
+  'omni:list-memories': { projectId?: string | null; type?: string };
+  'omni:search-memories': { query: string; limit?: number; projectId?: string | null };
   'omni:save-memory': { content: string };
   'omni:delete-memory': { id: string };
   'omni:delete-conversation': { conversationId: string };

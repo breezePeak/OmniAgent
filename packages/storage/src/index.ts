@@ -306,8 +306,15 @@ export class OmniAgentStorage {
     return memory;
   }
 
-  async listMemories(): Promise<MemoryRecord[]> {
-    return (await this.db.memories.toArray()).sort((a, b) => b.updatedAt - a.updatedAt);
+  async listMemories(options: { projectId?: string | null; type?: string } = {}): Promise<MemoryRecord[]> {
+    let rows = await this.db.memories.toArray();
+    if (options.projectId) {
+      rows = rows.filter((row) => row.projectId === options.projectId || row.scope === 'global');
+    }
+    if (options.type) {
+      rows = rows.filter((row) => row.type === options.type);
+    }
+    return rows.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   async markMemoryAccessed(id: string): Promise<void> {

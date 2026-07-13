@@ -150,7 +150,23 @@ export default defineBackground(() => {
       if (!payload?.payload?.trim()) throw new Error('导入内容不能为空');
       return importWorkspaceData(payload.payload);
     }
-    if (message.type === 'omni:list-memories') return storage.listMemories();
+    if (message.type === 'omni:list-memories') {
+      const payload = message.payload as ExtensionMessage<'omni:list-memories'>['payload'];
+      return storage.listMemories({
+        projectId: payload?.projectId,
+        type: payload?.type,
+      });
+    }
+    if (message.type === 'omni:search-memories') {
+      const payload = message.payload as ExtensionMessage<'omni:search-memories'>['payload'];
+      if (!payload?.query?.trim()) return [];
+      const activeProjectId = payload.projectId ?? await storage.getActiveProjectId();
+      const matches = await memory.retrieve(payload.query, {
+        projectId: activeProjectId ?? undefined,
+        limit: payload.limit ?? 20,
+      });
+      return matches.map(({ memory: item, score }) => ({ ...item, score }));
+    }
     if (message.type === 'omni:save-memory') {
       const payload = message.payload as { content?: string } | undefined;
       if (!payload?.content?.trim()) throw new Error('记忆内容不能为空');

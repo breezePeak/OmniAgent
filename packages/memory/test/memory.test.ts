@@ -57,3 +57,14 @@ test('extracts profile memories and supports delete', async (t) => {
   await memory.delete(saved!.id);
   assert.equal((await storage.listMemories()).length, 0);
 });
+
+test('scopes explicit memories to a project when provided', async (t) => {
+  const storage = new OmniAgentStorage(new OmniAgentDatabase(`omni-agent-memory-project-test-${randomUUID()}`));
+  t.after(() => storage.db.delete());
+  const memory = new MemoryService(storage);
+
+  const saved = await memory.extractExplicitUserMemory('请记住：本项目使用 pnpm monorepo', { projectId: 'p1' });
+  assert.equal(saved?.scope, 'project');
+  assert.equal(saved?.projectId, 'p1');
+  assert.equal((await storage.listMemories({ projectId: 'p1' })).length, 1);
+});

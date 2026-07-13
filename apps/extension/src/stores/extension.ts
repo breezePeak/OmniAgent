@@ -58,6 +58,9 @@ export const useExtensionStore = defineStore('extension', {
     backupMessage: '',
     memories: [] as MemoryRecord[],
     memoryDraft: '',
+    memoryQuery: '',
+    memoryTypeFilter: '' as '' | MemoryRecord['type'],
+    memoryProjectOnly: false,
     memoryLoading: false,
     memoryError: '',
     memoryDiagnostic: null as MemoryInjectionDiagnostic | null,
@@ -197,9 +200,27 @@ export const useExtensionStore = defineStore('extension', {
     async refreshMemories() {
       this.memoryLoading = true;
       try {
-        this.memories = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-memories'>, MemoryRecord[]>({
-          type: 'omni:list-memories',
-        });
+        if (this.memoryQuery.trim()) {
+          this.memories = await browser.runtime.sendMessage<
+            ExtensionMessage<'omni:search-memories'>,
+            MemoryRecord[]
+          >({
+            type: 'omni:search-memories',
+            payload: {
+              query: this.memoryQuery.trim(),
+              projectId: this.memoryProjectOnly ? (this.activeProjectId || null) : undefined,
+              limit: 30,
+            },
+          });
+        } else {
+          this.memories = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-memories'>, MemoryRecord[]>({
+            type: 'omni:list-memories',
+            payload: {
+              projectId: this.memoryProjectOnly ? (this.activeProjectId || null) : undefined,
+              type: this.memoryTypeFilter || undefined,
+            },
+          });
+        }
         this.memoryError = '';
       } catch (error) {
         this.memoryError = error instanceof Error ? error.message : '读取记忆失败';
