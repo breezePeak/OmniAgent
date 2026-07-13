@@ -78,6 +78,16 @@ export const useExtensionStore = defineStore('extension', {
     selectedToolName: '',
     toolArgumentJson: '{\n  "query": ""\n}',
     lastToolResult: null as ToolResult | null,
+    toolHistory: [] as Array<{
+      id: string;
+      name: string;
+      ok: boolean;
+      arguments?: Record<string, unknown>;
+      result?: unknown;
+      error?: string;
+      durationMs: number;
+      at: number;
+    }>,
     toolLoading: false,
     toolError: '',
     mcpServers: [] as McpServerSummary[],
@@ -85,6 +95,7 @@ export const useExtensionStore = defineStore('extension', {
     mcpError: '',
     agentTasks: [] as AgentTask[],
     selectedAgentTaskId: '',
+    agentStatusFilter: '' as '' | AgentTask['status'],
     agentGoalDraft: '',
     agentLoading: false,
     agentError: '',
@@ -388,9 +399,39 @@ export const useExtensionStore = defineStore('extension', {
           this.selectedToolName = this.tools[0]?.name ?? '';
           this.syncToolArgumentTemplate();
         }
+        await this.refreshToolHistory();
         this.toolError = '';
       } catch (error) {
         this.toolError = error instanceof Error ? error.message : '读取工具失败';
+      } finally {
+        this.toolLoading = false;
+      }
+    },
+    async refreshToolHistory() {
+      this.toolHistory = await browser.runtime.sendMessage<
+        ExtensionMessage<'omni:list-tool-history'>,
+        Array<{
+          id: string;
+          name: string;
+          ok: boolean;
+          arguments?: Record<string, unknown>;
+          result?: unknown;
+          error?: string;
+          durationMs: number;
+          at: number;
+        }>
+      >({ type: 'omni:list-tool-history' });
+    },
+    async clearToolHistory() {
+      this.toolLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:clear-tool-history'>, { ok: boolean }>({
+          type: 'omni:clear-tool-history',
+        });
+        this.toolHistory = [];
+        this.lastToolResult = null;
+      } catch (error) {
+        this.toolError = error instanceof Error ? error.message : '清空工具历史失败';
       } finally {
         this.toolLoading = false;
       }
@@ -433,12 +474,55 @@ export const useExtensionStore = defineStore('extension', {
             providerId: this.adapter.provider ?? undefined,
           },
         });
+        await this.refreshToolHistory();
         if (this.selectedToolName.startsWith('memory.')) await this.refreshMemories();
       } catch (error) {
         this.toolError = error instanceof Error ? error.message : '执行工具失败';
         this.lastToolResult = null;
       } finally {
         this.toolLoading = false;
+      }
+    },
+    async clearMemories() {
+      this.memoryLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:clear-memories'>, { ok: boolean; count: number }>({
+          type: 'omni:clear-memories',
+        });
+        this.memories = [];
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '清空记忆失败';
+      } finally {
+        this.memoryLoading = false;
+      }
+    },
+    async clearConversations() {
+      this.storageLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:clear-conversations'>, { ok: boolean; count: number }>({
+          type: 'omni:clear-conversations',
+        });
+        this.savedConversations = [];
+        this.selectedConversationId = '';
+        this.savedMessages = [];
+      } catch (error) {
+        this.conversationError = error instanceof Error ? error.message : '清空会话失败';
+      } finally {
+        this.storageLoading = false;
+      }
+    },
+    async clearAgentTasks() {
+      this.agentLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:clear-agent-tasks'>, { ok: boolean; count: number }>({
+          type: 'omni:clear-agent-tasks',
+        });
+        this.agentTasks = [];
+        this.selectedAgentTaskId = '';
+      } catch (error) {
+        this.agentError = error instanceof Error ? error.message : '清空任务失败';
+      } finally {
+        this.agentLoading = false;
       }
     },
     async refreshMcpServers() {
@@ -457,9 +541,12 @@ export const useExtensionStore = defineStore('extension', {
     async refreshAgentTasks() {
       this.agentLoading = true;
       try {
-        this.agentTasks = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-agent-tasks'>, AgentTask[]>({
+        const tasks = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-agent-tasks'>, AgentTask[]>({
           type: 'omni:list-agent-tasks',
         });
+        this.agentTasks = this.agentStatusFilter
+          ? tasks.filter((task) => task.status === this.agentStatusFilter)
+          : tasks;
         if (!this.agentTasks.some((task) => task.id === this.selectedAgentTaskId)) {
           this.selectedAgentTaskId = this.agentTasks[0]?.id ?? '';
         }

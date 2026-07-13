@@ -325,6 +325,27 @@ export class OmniAgentStorage {
     await this.db.memories.delete(id);
   }
 
+  async clearMemories(): Promise<number> {
+    const count = await this.db.memories.count();
+    await this.db.memories.clear();
+    return count;
+  }
+
+  async clearConversations(): Promise<number> {
+    const count = await this.db.conversations.count();
+    await this.db.transaction('rw', this.db.conversations, this.db.messages, async () => {
+      await this.db.messages.clear();
+      await this.db.conversations.clear();
+    });
+    return count;
+  }
+
+  async clearAgentTasks(): Promise<number> {
+    const count = await this.db.agentTasks.count();
+    await this.db.agentTasks.clear();
+    return count;
+  }
+
   async listSkills(): Promise<SkillRecord[]> {
     return (await this.db.skills.toArray()).sort((a, b) => a.name.localeCompare(b.name));
   }

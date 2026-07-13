@@ -20,6 +20,19 @@ import { AgentRuntime, type AgentTask } from '@omni-agent/agent-core';
 const adapters = createAdapterRegistry([deepseekAdapter, kimiAdapter]);
 const memoryDiagnosticKey = 'memory-injection-diagnostic';
 const runtimeSettingsKey = 'runtime-settings';
+const toolHistoryKey = 'tool-execution-history';
+const MAX_TOOL_HISTORY = 50;
+
+interface ToolHistoryItem {
+  id: string;
+  name: string;
+  ok: boolean;
+  arguments?: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  durationMs: number;
+  at: number;
+}
 const skills = new SkillService({
   listSkills: async () => (await storage.listSkills()).map(fromSkillRecord),
   saveSkill: async (skill) => fromSkillRecord(await storage.saveSkill(toSkillRecord(skill))),
@@ -238,14 +251,47 @@ export default defineBackground(() => {
       await ensureMcpReady();
       return tools.list();
     }
+    if (message.type === 'omni:list-tool-history') return listToolHistory();
+    if (message.type === 'omni:clear-tool-history') {
+      await storage.setSetting(toolHistoryKey, []);
+      return { ok: true };
+    }
+    if (message.type === 'omni:clear-memories') {
+      const count = await storage.clearMemories();
+      return { ok: true, count };
+    }
+    if (message.type === 'omni:clear-conversations') {
+      const count = await storage.clearConversations();
+      return { ok: true, count };
+    }
+    if (message.type === 'omni:clear-agent-tasks') {
+      await ensureAgentReady();
+      const tasks = agent.listTasks();
+      for (const task of tasks) await agent.deleteTask(task.id);
+      const count = await storage.clearAgentTasks();
+      agentReady = null;
+      await ensureAgentReady();
+      return { ok: true, count };
+    }
     if (message.type === 'omni:execute-tool') {
       await ensureMcpReady();
       const payload = message.payload as ExtensionMessage<'omni:execute-tool'>['payload'];
       if (!payload?.name?.trim()) throw new Error('Tool 名称不能为空');
-      return tools.execute(
+      const result = await tools.execute(
         { name: payload.name, arguments: payload.arguments ?? {} },
         { providerId: payload.providerId ?? null },
       );
+      await appendToolHistory({
+        id: crypto.randomUUID(),
+        name: payload.name,
+        ok: result.ok,
+        arguments: payload.arguments ?? {},
+        result: result.ok ? result.result : undefined,
+        error: result.ok ? undefined : result.error,
+        durationMs: result.durationMs,
+        at: Date.now(),
+      });
+      return result;
     }
     if (message.type === 'omni:list-mcp-servers') {
       await ensureMcpReady();
@@ -813,6 +859,16 @@ async function getRuntimeSettings(): Promise<RuntimeSettings> {
     injectTools: stored?.injectTools ?? true,
     injectProject: stored?.injectProject ?? true,
   };
+}
+
+async function listToolHistory(): Promise<ToolHistoryItem[]> {
+  return (await storage.getSetting<ToolHistoryItem[]>(toolHistoryKey)) ?? [];
+}
+
+async function appendToolHistory(item: ToolHistoryItem): Promise<void> {
+  const history = await listToolHistory();
+  const next = [item, ...history].slice(0, MAX_TOOL_HISTORY);
+  await storage.setSetting(toolHistoryKey, next);
 }
 
 function summarizeTitle(text: string): string {

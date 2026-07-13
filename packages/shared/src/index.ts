@@ -39,6 +39,11 @@ export interface ExtensionMessageMap {
   'omni:set-skill-enabled': { id: string; enabled: boolean };
   'omni:match-skills': { query: string; limit?: number };
   'omni:list-tools': Record<string, never>;
+  'omni:list-tool-history': Record<string, never>;
+  'omni:clear-tool-history': Record<string, never>;
+  'omni:clear-memories': Record<string, never>;
+  'omni:clear-conversations': Record<string, never>;
+  'omni:clear-agent-tasks': Record<string, never>;
   'omni:execute-tool': {
     name: string;
     arguments?: Record<string, unknown>;

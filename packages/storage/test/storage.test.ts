@@ -124,4 +124,20 @@ test('stores providers, conversations, messages, and settings locally', async (t
   assert.equal(projectConversation.projectId, 'project-1');
   assert.equal((await storage.listConversations('kimi', 'project-1')).length, 1);
   assert.equal((await storage.listConversations('deepseek', 'project-1')).length, 0);
+
+  await storage.saveMemory({
+    type: 'knowledge',
+    scope: 'global',
+    providerId: null,
+    projectId: null,
+    content: 'to-clear',
+    summary: 'to-clear',
+    keywords: ['clear'],
+    importance: 0.5,
+    confidence: 0.5,
+  });
+  assert.ok((await storage.clearMemories()) >= 1);
+  assert.equal((await storage.listMemories()).length, 0);
+  assert.ok((await storage.clearAgentTasks()) >= 1);
+  assert.equal((await storage.listAgentTasks()).length, 0);
 });

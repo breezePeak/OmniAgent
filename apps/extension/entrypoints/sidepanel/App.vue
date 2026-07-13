@@ -36,6 +36,16 @@ function formatToolResult(result: ToolResult): string {
   }
 }
 
+function summarizeHistory(value: unknown): string {
+  if (value == null) return 'ok';
+  try {
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+  } catch {
+    return String(value);
+  }
+}
+
 const selectedAgentTask = computed(
   () => extension.agentTasks.find((task) => task.id === extension.selectedAgentTaskId) ?? null,
 );
@@ -134,6 +144,9 @@ onMounted(() => {
           >
             删除
           </el-button>
+          <el-button text type="danger" :loading="extension.storageLoading" @click="extension.clearConversations">
+            清空
+          </el-button>
         </div>
       </div>
       <div class="filter-row">
@@ -182,7 +195,10 @@ onMounted(() => {
     <section class="capability-card">
       <div class="section-heading">
         <h2>长期记忆</h2>
-        <el-button text :loading="extension.memoryLoading" @click="extension.refreshMemories(); extension.refreshMemoryDiagnostic()">刷新</el-button>
+        <div class="heading-actions">
+          <el-button text :loading="extension.memoryLoading" @click="extension.refreshMemories(); extension.refreshMemoryDiagnostic()">刷新</el-button>
+          <el-button text type="danger" :loading="extension.memoryLoading" @click="extension.clearMemories">清空</el-button>
+        </div>
       </div>
       <p v-if="extension.memoryDiagnostic" class="detected-host">
         注入诊断：{{ extension.memoryDiagnostic.detail }}
@@ -323,7 +339,10 @@ onMounted(() => {
     <section class="capability-card">
       <div class="section-heading">
         <h2>Tool Runtime</h2>
-        <el-button text :loading="extension.toolLoading" @click="extension.refreshTools">刷新</el-button>
+        <div class="heading-actions">
+          <el-button text :loading="extension.toolLoading" @click="extension.refreshTools">刷新</el-button>
+          <el-button text type="danger" :loading="extension.toolLoading" @click="extension.clearToolHistory">清空历史</el-button>
+        </div>
       </div>
       <el-select
         :model-value="extension.selectedToolName"
@@ -360,6 +379,12 @@ onMounted(() => {
       <div v-if="extension.lastToolResult" class="message-block">
         <span class="message-role">{{ extension.lastToolResult.ok ? 'result' : 'error' }} · {{ extension.lastToolResult.durationMs }}ms</span>
         <p class="response-text">{{ formatToolResult(extension.lastToolResult) }}</p>
+      </div>
+      <div v-if="extension.toolHistory.length" class="message-history">
+        <article v-for="item in extension.toolHistory.slice(0, 8)" :key="item.id" class="stored-message" :data-role="item.ok ? 'user' : 'assistant'">
+          <span class="message-role">{{ item.ok ? 'ok' : 'failed' }} · {{ item.name }} · {{ item.durationMs }}ms</span>
+          <p>{{ item.error || summarizeHistory(item.result) }}</p>
+        </article>
       </div>
       <p v-else class="empty-text">尚未执行工具</p>
     </section>
@@ -496,7 +521,10 @@ onMounted(() => {
     <section class="capability-card">
       <div class="section-heading">
         <h2>Agent Runtime</h2>
-        <el-button text :loading="extension.agentLoading" @click="extension.refreshAgentTasks">刷新</el-button>
+        <div class="heading-actions">
+          <el-button text :loading="extension.agentLoading" @click="extension.refreshAgentTasks">刷新</el-button>
+          <el-button text type="danger" :loading="extension.agentLoading" @click="extension.clearAgentTasks">清空</el-button>
+        </div>
       </div>
       <el-input
         v-model="extension.agentGoalDraft"
@@ -531,6 +559,21 @@ onMounted(() => {
           删除
         </el-button>
       </div>
+      <el-select
+        v-model="extension.agentStatusFilter"
+        class="conversation-select"
+        clearable
+        placeholder="全部状态"
+        @change="extension.refreshAgentTasks"
+      >
+        <el-option label="idle" value="idle" />
+        <el-option label="planning" value="planning" />
+        <el-option label="running" value="running" />
+        <el-option label="waiting_tool" value="waiting_tool" />
+        <el-option label="completed" value="completed" />
+        <el-option label="failed" value="failed" />
+        <el-option label="stopped" value="stopped" />
+      </el-select>
       <el-alert v-if="extension.agentError" class="action-error" :title="extension.agentError" type="error" :closable="false" />
       <el-select
         v-model="extension.selectedAgentTaskId"
