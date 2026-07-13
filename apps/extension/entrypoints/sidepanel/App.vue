@@ -121,7 +121,18 @@ onMounted(() => {
     <section class="capability-card">
       <div class="section-heading">
         <h2>本地会话</h2>
-        <el-button text :loading="extension.storageLoading" @click="extension.refreshSavedConversations">刷新</el-button>
+        <div class="heading-actions">
+          <el-button text :loading="extension.storageLoading" @click="extension.refreshSavedConversations">刷新</el-button>
+          <el-button
+            text
+            type="danger"
+            :disabled="!extension.selectedConversationId"
+            :loading="extension.storageLoading"
+            @click="extension.deleteSelectedConversation"
+          >
+            删除
+          </el-button>
+        </div>
       </div>
       <el-select
         v-model="extension.selectedConversationId"
@@ -133,7 +144,7 @@ onMounted(() => {
         <el-option
           v-for="conversation in extension.savedConversations"
           :key="conversation.id"
-          :label="conversation.title || conversation.externalId"
+          :label="`${conversation.providerId} · ${conversation.title || conversation.externalId}`"
           :value="conversation.id"
         />
       </el-select>
@@ -168,7 +179,10 @@ onMounted(() => {
       <el-alert v-if="extension.memoryError" class="action-error" :title="extension.memoryError" type="error" :closable="false" />
       <ul v-if="extension.memories.length" class="memory-list">
         <li v-for="memory in extension.memories" :key="memory.id">
-          <span class="message-role">{{ memory.type }}</span>
+          <div class="skill-item-header">
+            <span class="message-role">{{ memory.type }}</span>
+            <el-button text type="danger" size="small" @click="extension.deleteMemory(memory.id)">删除</el-button>
+          </div>
           <p>{{ memory.summary }}</p>
         </li>
       </ul>
@@ -211,11 +225,22 @@ onMounted(() => {
               <span class="message-role">{{ skill.source }} · {{ skill.enabled ? 'enabled' : 'disabled' }}</span>
               <strong>{{ skill.manifest.name }}</strong>
             </div>
-            <el-switch
-              :model-value="skill.enabled"
-              size="small"
-              @change="(value: string | number | boolean) => extension.setSkillEnabled(skill.id, Boolean(value))"
-            />
+            <div class="heading-actions">
+              <el-switch
+                :model-value="skill.enabled"
+                size="small"
+                @change="(value: string | number | boolean) => extension.setSkillEnabled(skill.id, Boolean(value))"
+              />
+              <el-button
+                v-if="skill.source === 'user'"
+                text
+                type="danger"
+                size="small"
+                @click="extension.deleteSkill(skill.id)"
+              >
+                删除
+              </el-button>
+            </div>
           </div>
           <p>{{ skill.manifest.description || skill.prompt }}</p>
           <p v-if="skill.manifest.triggers?.length" class="skill-triggers">触发：{{ skill.manifest.triggers.join(' / ') }}</p>

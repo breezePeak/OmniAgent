@@ -97,4 +97,10 @@ test('stores providers, conversations, messages, and settings locally', async (t
   const tasks = await storage.listAgentTasks();
   assert.equal(tasks.length, 1);
   assert.equal(tasks[0]?.goal, '测试任务');
+
+  await storage.updateConversationTitle(conversation.id, '更新标题');
+  assert.equal((await storage.listConversations('deepseek'))[0]?.title, '更新标题');
+  await storage.deleteConversation(conversation.id);
+  assert.equal((await storage.listConversations('deepseek')).length, 0);
+  assert.equal((await storage.listMessages(conversation.id)).length, 0);
 });

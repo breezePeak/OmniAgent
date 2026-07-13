@@ -17,8 +17,9 @@ h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .message-block + .message-block { margin-top: 16px; }
 .message-role { display: inline-block; margin-bottom: 6px; color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .empty-text { margin: 0; color: #94a3b8; font-size: 13px; }
-.section-heading { display: flex; align-items: center; justify-content: space-between; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .section-heading h2 { margin-bottom: 0; }
+.heading-actions { display: flex; align-items: center; gap: 4px; }
 .conversation-select { width: 100%; margin: 12px 0; }
 .message-history { max-height: 320px; overflow: auto; }
 .stored-message { margin: 0 0 10px; padding: 10px; border-radius: 8px; background: #f8fafc; }

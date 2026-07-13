@@ -57,10 +57,14 @@ export class MemoryService {
     if (!isExplicitMemory(normalized)) return null;
     return this.save({
       type: inferMemoryType(normalized),
-      content: normalized.replace(/^(请)?(帮我)?记住[：:\s]*/u, '').trim() || normalized,
+      content: normalizeMemoryContent(normalized),
       importance: 0.8,
       confidence: 0.9,
     });
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.repository.deleteMemory(id);
   }
 
   async retrieve(query: string, options: { providerId?: SupportedProvider; projectId?: string; limit?: number } = {}): Promise<MemoryMatch[]> {
@@ -84,11 +88,25 @@ export class MemoryService {
 export const memory = new MemoryService();
 
 function isExplicitMemory(content: string): boolean {
-  return /^(请)?(帮我)?记住[：:\s]/u.test(content) || /我(喜欢|偏好|习惯|通常|不喜欢)/u.test(content);
+  return (
+    /^(请)?(帮我)?记住[：:\s]/u.test(content) ||
+    /我(喜欢|偏好|习惯|通常|不喜欢)/u.test(content) ||
+    /我(叫|是|的名字是)/u.test(content) ||
+    /我住在|我在|我的职业|我的工作/u.test(content)
+  );
 }
 
 function inferMemoryType(content: string): MemoryType {
-  return /我(喜欢|偏好|习惯|通常|不喜欢)/u.test(content) ? 'preference' : 'knowledge';
+  if (/我(喜欢|偏好|习惯|通常|不喜欢)/u.test(content)) return 'preference';
+  if (/我(叫|是|的名字是)|我住在|我的职业|我的工作/u.test(content)) return 'profile';
+  return 'knowledge';
+}
+
+function normalizeMemoryContent(content: string): string {
+  return content
+    .replace(/^(请)?(帮我)?记住[：:\s]*/u, '')
+    .replace(/^(请)?(帮我)?记下[：:\s]*/u, '')
+    .trim() || content;
 }
 
 function summarize(content: string): string {

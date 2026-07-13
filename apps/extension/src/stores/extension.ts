@@ -189,6 +189,36 @@ export const useExtensionStore = defineStore('extension', {
         this.memoryLoading = false;
       }
     },
+    async deleteMemory(id: string) {
+      this.memoryLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:delete-memory'>, { ok: boolean }>({
+          type: 'omni:delete-memory',
+          payload: { id },
+        });
+        await this.refreshMemories();
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '删除记忆失败';
+      } finally {
+        this.memoryLoading = false;
+      }
+    },
+    async deleteSelectedConversation() {
+      if (!this.selectedConversationId) return;
+      this.storageLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:delete-conversation'>, { ok: boolean }>({
+          type: 'omni:delete-conversation',
+          payload: { conversationId: this.selectedConversationId },
+        });
+        this.selectedConversationId = '';
+        await this.refreshSavedConversations();
+      } catch (error) {
+        this.conversationError = error instanceof Error ? error.message : '删除会话失败';
+      } finally {
+        this.storageLoading = false;
+      }
+    },
     async refreshSkills() {
       this.skillLoading = true;
       try {
@@ -241,6 +271,20 @@ export const useExtensionStore = defineStore('extension', {
         await this.refreshSkills();
       } catch (error) {
         this.skillError = error instanceof Error ? error.message : '更新 Skill 失败';
+      } finally {
+        this.skillLoading = false;
+      }
+    },
+    async deleteSkill(id: string) {
+      this.skillLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:delete-skill'>, { ok: boolean }>({
+          type: 'omni:delete-skill',
+          payload: { id },
+        });
+        await this.refreshSkills();
+      } catch (error) {
+        this.skillError = error instanceof Error ? error.message : '删除 Skill 失败';
       } finally {
         this.skillLoading = false;
       }

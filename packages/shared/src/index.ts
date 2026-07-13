@@ -21,6 +21,9 @@ export interface ExtensionMessageMap {
   'omni:list-messages': { conversationId: string };
   'omni:list-memories': Record<string, never>;
   'omni:save-memory': { content: string };
+  'omni:delete-memory': { id: string };
+  'omni:delete-conversation': { conversationId: string };
+  'omni:delete-skill': { id: string };
   'omni:list-skills': Record<string, never>;
   'omni:register-skill': {
     name: string;

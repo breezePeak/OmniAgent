@@ -145,6 +145,24 @@ export default defineBackground(() => {
       if (!payload?.content?.trim()) throw new Error('记忆内容不能为空');
       return memory.save({ type: 'knowledge', content: payload.content, importance: 0.7, confidence: 1 });
     }
+    if (message.type === 'omni:delete-memory') {
+      const payload = message.payload as ExtensionMessage<'omni:delete-memory'>['payload'];
+      if (!payload?.id) throw new Error('记忆 id 不能为空');
+      await memory.delete(payload.id);
+      return { ok: true };
+    }
+    if (message.type === 'omni:delete-conversation') {
+      const payload = message.payload as ExtensionMessage<'omni:delete-conversation'>['payload'];
+      if (!payload?.conversationId) throw new Error('conversationId 不能为空');
+      await storage.deleteConversation(payload.conversationId);
+      return { ok: true };
+    }
+    if (message.type === 'omni:delete-skill') {
+      const payload = message.payload as ExtensionMessage<'omni:delete-skill'>['payload'];
+      if (!payload?.id) throw new Error('Skill id 不能为空');
+      await skills.remove(payload.id);
+      return { ok: true };
+    }
     if (message.type === 'omni:list-skills') return skills.list();
     if (message.type === 'omni:register-skill') {
       const payload = message.payload as ExtensionMessage<'omni:register-skill'>['payload'];
@@ -467,7 +485,11 @@ async function persistPageMessage(message: ExtensionMessage<'omni:response-updat
   const conversation = await storage.getOrCreateConversation({
     providerId: payload.provider,
     externalId: payload.conversationId,
+    title: payload.role === 'user' ? summarizeTitle(payload.text) : null,
   });
+  if (payload.role === 'user' && !conversation.title) {
+    await storage.updateConversationTitle(conversation.id, summarizeTitle(payload.text));
+  }
   await storage.upsertMessage({
     conversationId: conversation.id,
     externalId: payload.messageId,
@@ -476,6 +498,11 @@ async function persistPageMessage(message: ExtensionMessage<'omni:response-updat
     attachments: [],
   });
   if (payload.role === 'user') await memory.extractExplicitUserMemory(payload.text);
+}
+
+function summarizeTitle(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized.length > 40 ? `${normalized.slice(0, 37)}...` : normalized;
 }
 
 function statusFor(url: string | undefined, adapter: ReturnType<typeof adapters.find>): AdapterStatus {

@@ -245,6 +245,17 @@ export class OmniAgentStorage {
     return (await collection.toArray()).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  async updateConversationTitle(id: string, title: string): Promise<void> {
+    await this.db.conversations.update(id, { title, updatedAt: Date.now() });
+  }
+
+  async deleteConversation(id: string): Promise<void> {
+    await this.db.transaction('rw', this.db.conversations, this.db.messages, async () => {
+      await this.db.messages.where('conversationId').equals(id).delete();
+      await this.db.conversations.delete(id);
+    });
+  }
+
   async setSetting(key: string, value: unknown): Promise<void> {
     await this.db.settings.put({ key, value, updatedAt: Date.now() });
   }
@@ -273,6 +284,10 @@ export class OmniAgentStorage {
 
   async markMemoryAccessed(id: string): Promise<void> {
     await this.db.memories.update(id, { lastAccessedAt: Date.now() });
+  }
+
+  async deleteMemory(id: string): Promise<void> {
+    await this.db.memories.delete(id);
   }
 
   async listSkills(): Promise<SkillRecord[]> {

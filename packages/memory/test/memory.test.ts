@@ -44,3 +44,16 @@ test('retrieves a saved name for a natural-language identity question', async (t
   assert.equal(matches.length, 1);
   assert.match(memory.formatContext(matches), /小峰/);
 });
+
+test('extracts profile memories and supports delete', async (t) => {
+  const storage = new OmniAgentStorage(new OmniAgentDatabase(`omni-agent-memory-profile-test-${randomUUID()}`));
+  t.after(() => storage.db.delete());
+  const memory = new MemoryService(storage);
+
+  const saved = await memory.extractExplicitUserMemory('我叫小峰');
+  assert.equal(saved?.type, 'profile');
+  assert.equal(saved?.content, '我叫小峰');
+
+  await memory.delete(saved!.id);
+  assert.equal((await storage.listMemories()).length, 0);
+});
