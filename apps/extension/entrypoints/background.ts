@@ -1,27 +1,32 @@
-import { createAdapterRegistry, deepseekAdapter, kimiAdapter, providerFromAdapter } from '@omni-agent/site-adapters';
+import { createAdapterRegistry, deepseekAdapter, getProviderCapabilities, kimiAdapter, providerFromAdapter } from '@omni-agent/site-adapters';
 import type { AdapterStatus, ExtensionMessage } from '@omni-agent/shared';
-import { storage, type AgentTaskRecord, type ProjectRecord, type SkillRecord } from '@omni-agent/storage';
+import { storage, type AgentTaskRecord, type MessageRecord, type ProjectRecord, type SkillRecord } from '@omni-agent/storage';
 import { memory } from '@omni-agent/memory';
 import { SkillService, type SkillDefinition } from '@omni-agent/skills';
 import { normalizeNavigateUrl } from '@omni-agent/browser-agent';
 import {
   createToolRuntime,
+  browserClickTool,
+  browserNavigateTool,
+  browserScrollTool,
+  browserSnapshotTool,
+  browserTypeTool,
+  memorySaveTool,
+  memorySearchTool,
   type BrowserActionResult,
   type BrowserSnapshot,
-  type ToolDefinition,
 } from '@omni-agent/tools';
-import {
-  McpProvider,
-  createEchoServer,
-  createMemoryNotesServer,
-} from '@omni-agent/mcp';
+import { McpProvider } from '@omni-agent/mcp';
 import { AgentRuntime, type AgentTask } from '@omni-agent/agent-core';
+import { buildContinuationPrompt, parseAgentDecision, serializeToolResult } from '@omni-agent/agent-protocol';
 
 const adapters = createAdapterRegistry([deepseekAdapter, kimiAdapter]);
 const memoryDiagnosticKey = 'memory-injection-diagnostic';
 const runtimeSettingsKey = 'runtime-settings';
 const toolHistoryKey = 'tool-execution-history';
+const skillRequestOverrideKey = 'skill-request-override';
 const MAX_TOOL_HISTORY = 50;
+const handledModelActions = new Set<string>();
 
 interface ToolHistoryItem {
   id: string;
@@ -39,6 +44,7 @@ const skills = new SkillService({
   deleteSkill: async (id) => storage.deleteSkill(id),
 });
 const tools = createToolRuntime({
+  includeBuiltins: false,
   services: {
     memory: {
       search: async (query, options) => {
@@ -55,11 +61,13 @@ const tools = createToolRuntime({
           score,
         }));
       },
-      save: async (input) => memory.save({
+      save: async (input) => memory.propose({
         type: (input.type as 'knowledge' | 'preference' | 'profile' | 'project' | 'episode' | 'procedure') || 'knowledge',
         content: input.content,
         importance: input.importance ?? 0.7,
         confidence: 1,
+        sourceKind: 'model_tool',
+        policy: toMemoryWritePolicy((await getRuntimeSettings()).memorySaveMode),
       }),
     },
     browser: {
@@ -71,6 +79,8 @@ const tools = createToolRuntime({
     },
   },
 });
+tools.registry.register(memorySearchTool);
+tools.registry.register(memorySaveTool);
 const mcp = new McpProvider();
 const agent = new AgentRuntime({
   sources: {
@@ -108,7 +118,11 @@ type InternalMessage = {
 export default defineBackground(() => {
   browser.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
   void skills.ensureReady().catch(console.error);
-  void ensureMcpReady().catch(console.error);
+  // Legacy data is migrated incrementally and never deleted during startup.
+  void memory.migrateLegacy().catch(console.error);
+  void getRuntimeSettings().then((settings) => {
+    if (settings.browserControlEnabled) ensureBrowserControlEnabled();
+  }).catch(console.error);
   void ensureAgentReady().catch(console.error);
 
   browser.runtime.onInstalled.addListener(() => {
@@ -117,16 +131,15 @@ export default defineBackground(() => {
       id: 'deepseek',
       name: 'DeepSeek',
       adapter: 'deepseek',
-      capabilities: ['conversation', 'message-observation', 'prompt-insertion'],
+      capabilities: providerCapabilityNames('deepseek'),
     });
     void storage.upsertProvider({
       id: 'kimi',
       name: 'Kimi',
       adapter: 'kimi',
-      capabilities: ['conversation', 'message-observation', 'prompt-insertion'],
+      capabilities: providerCapabilityNames('kimi'),
     });
     void skills.ensureReady().catch(console.error);
-    void ensureMcpReady().catch(console.error);
     void ensureAgentReady().catch(console.error);
   });
 
@@ -147,6 +160,7 @@ export default defineBackground(() => {
 
     if (message.type === 'omni:response-update') {
       await persistPageMessage(message as ExtensionMessage<'omni:response-update'>);
+      await handleModelToolCall(message as ExtensionMessage<'omni:response-update'>);
       return undefined;
     }
     if (message.type === 'omni:list-conversations') {
@@ -157,6 +171,14 @@ export default defineBackground(() => {
       const payload = message.payload as { conversationId?: string } | undefined;
       return payload?.conversationId ? storage.listMessages(payload.conversationId) : [];
     }
+    if (message.type === 'omni:list-session-chunks') {
+      const payload = message.payload as ExtensionMessage<'omni:list-session-chunks'>['payload'];
+      return storage.listSessionChunks({ projectId: payload?.projectId, limit: payload?.limit });
+    }
+    if (message.type === 'omni:search-session-chunks') {
+      const payload = message.payload as ExtensionMessage<'omni:search-session-chunks'>['payload'];
+      return payload?.query?.trim() ? storage.searchSessionChunks(payload.query, { projectId: payload.projectId, limit: payload.limit }) : [];
+    }
     if (message.type === 'omni:export-data') return exportWorkspaceData();
     if (message.type === 'omni:import-data') {
       const payload = message.payload as ExtensionMessage<'omni:import-data'>['payload'];
@@ -165,9 +187,9 @@ export default defineBackground(() => {
     }
     if (message.type === 'omni:list-memories') {
       const payload = message.payload as ExtensionMessage<'omni:list-memories'>['payload'];
-      return storage.listMemories({
+      return memory.list({
         projectId: payload?.projectId,
-        type: payload?.type,
+        type: payload?.type as 'knowledge' | 'preference' | 'profile' | 'project' | 'episode' | 'procedure' | undefined,
       });
     }
     if (message.type === 'omni:search-memories') {
@@ -181,16 +203,31 @@ export default defineBackground(() => {
       return matches.map(({ memory: item, score }) => ({ ...item, score }));
     }
     if (message.type === 'omni:save-memory') {
-      const payload = message.payload as { content?: string } | undefined;
+      const payload = message.payload as ExtensionMessage<'omni:save-memory'>['payload'];
       if (!payload?.content?.trim()) throw new Error('记忆内容不能为空');
       const activeProjectId = await storage.getActiveProjectId();
+      const scope = payload.scope ?? (activeProjectId ? 'project' : 'global');
       return memory.save({
-        type: 'knowledge',
+        type: (payload.type as 'knowledge' | 'preference' | 'profile' | 'project' | 'episode' | 'procedure') || 'knowledge',
         content: payload.content,
         importance: 0.7,
         confidence: 1,
-        scope: activeProjectId ? 'project' : 'global',
-        projectId: activeProjectId,
+        scope,
+        providerId: scope === 'provider' ? payload.providerId ?? null : null,
+        projectId: scope === 'project' ? payload.projectId ?? activeProjectId : null,
+      });
+    }
+    if (message.type === 'omni:update-memory') {
+      const payload = message.payload as ExtensionMessage<'omni:update-memory'>['payload'];
+      if (!payload?.id) throw new Error('记忆 id 不能为空');
+      const activeProjectId = await storage.getActiveProjectId();
+      return memory.update(payload.id, {
+        content: payload.content,
+        type: payload.type as 'knowledge' | 'preference' | 'profile' | 'project' | 'episode' | 'procedure' | undefined,
+        scope: payload.scope,
+        providerId: payload.providerId,
+        projectId: payload.scope === 'project' ? (payload.projectId ?? activeProjectId) : null,
+        pinned: payload.pinned,
       });
     }
     if (message.type === 'omni:get-settings') return getRuntimeSettings();
@@ -202,14 +239,36 @@ export default defineBackground(() => {
         injectSkills: payload?.injectSkills ?? current.injectSkills,
         injectTools: payload?.injectTools ?? current.injectTools,
         injectProject: payload?.injectProject ?? current.injectProject,
+        memorySaveMode: payload?.memorySaveMode ?? current.memorySaveMode,
+        browserControlEnabled: payload?.browserControlEnabled ?? current.browserControlEnabled,
       };
       await storage.setSetting(runtimeSettingsKey, next);
+      if (next.browserControlEnabled) ensureBrowserControlEnabled();
       return next;
     }
     if (message.type === 'omni:delete-memory') {
       const payload = message.payload as ExtensionMessage<'omni:delete-memory'>['payload'];
       if (!payload?.id) throw new Error('记忆 id 不能为空');
       await memory.delete(payload.id);
+      return { ok: true };
+    }
+    if (message.type === 'omni:get-memory-detail') {
+      const payload = message.payload as ExtensionMessage<'omni:get-memory-detail'>['payload'];
+      return payload?.id ? storage.getMemoryFactDetail(payload.id) : undefined;
+    }
+    if (message.type === 'omni:list-memory-candidates') {
+      const payload = message.payload as ExtensionMessage<'omni:list-memory-candidates'>['payload'];
+      return memory.listCandidates(payload?.status);
+    }
+    if (message.type === 'omni:accept-memory-candidate') {
+      const payload = message.payload as ExtensionMessage<'omni:accept-memory-candidate'>['payload'];
+      if (!payload?.id) throw new Error('候选记忆 id 不能为空');
+      return memory.acceptCandidate(payload.id, { value: payload.value });
+    }
+    if (message.type === 'omni:reject-memory-candidate') {
+      const payload = message.payload as ExtensionMessage<'omni:reject-memory-candidate'>['payload'];
+      if (!payload?.id) throw new Error('候选记忆 id 不能为空');
+      await memory.rejectCandidate(payload.id);
       return { ok: true };
     }
     if (message.type === 'omni:delete-conversation') {
@@ -225,6 +284,20 @@ export default defineBackground(() => {
       return { ok: true };
     }
     if (message.type === 'omni:list-skills') return skills.list();
+    if (message.type === 'omni:list-skill-templates') return skills.listTemplates();
+    if (message.type === 'omni:install-skill-template') {
+      const payload = message.payload as ExtensionMessage<'omni:install-skill-template'>['payload'];
+      if (!payload?.id) throw new Error('Skill template id 不能为空');
+      return skills.installTemplate(payload.id);
+    }
+    if (message.type === 'omni:set-skill-request-override') {
+      const payload = message.payload as ExtensionMessage<'omni:set-skill-request-override'>['payload'];
+      await storage.setSetting(skillRequestOverrideKey, {
+        skillId: payload?.skillId ?? null,
+        disableAll: payload?.disableAll === true,
+      });
+      return { ok: true };
+    }
     if (message.type === 'omni:register-skill') {
       const payload = message.payload as ExtensionMessage<'omni:register-skill'>['payload'];
       if (!payload?.name?.trim() || !payload.prompt?.trim()) throw new Error('Skill 名称和 Prompt 不能为空');
@@ -259,6 +332,10 @@ export default defineBackground(() => {
     if (message.type === 'omni:clear-memories') {
       const count = await storage.clearMemories();
       return { ok: true, count };
+    }
+    if (message.type === 'omni:deduplicate-memories') {
+      const duplicates = await memory.deduplicate();
+      return { ok: true, count: duplicates, mode: 'audit' };
     }
     if (message.type === 'omni:clear-conversations') {
       const count = await storage.clearConversations();
@@ -320,9 +397,13 @@ export default defineBackground(() => {
       const payload = message.payload as ExtensionMessage<'omni:create-agent-task'>['payload'];
       if (!payload?.goal?.trim()) throw new Error('任务目标不能为空');
       const activeProjectId = await storage.getActiveProjectId();
+      const activeTab = await getActiveTab();
+      const adapter = adapters.find(activeTab?.url ?? '');
+      const providerId = payload.providerId ?? providerFromAdapter(adapter);
       return agent.createTask({
         goal: payload.goal,
-        providerId: payload.providerId ?? null,
+        providerId: providerId ?? null,
+        conversationId: adapter?.getConversationId(activeTab?.url) ?? null,
         projectId: activeProjectId,
       });
     }
@@ -386,21 +467,56 @@ export default defineBackground(() => {
       await storage.deleteAgentTask(payload.taskId);
       return { ok: true };
     }
+    if (message.type === 'omni:switch-agent-provider') {
+      await ensureAgentReady();
+      const payload = message.payload as ExtensionMessage<'omni:switch-agent-provider'>['payload'];
+      if (!payload?.taskId || !payload.providerId) throw new Error('任务和 Provider 不能为空');
+      const switched = await agent.switchProvider(payload);
+      const activeTab = await getActiveTab();
+      const activeAdapter = adapters.find(activeTab?.url ?? '');
+      if (providerFromAdapter(activeAdapter) === payload.providerId) {
+        await sendToActiveTab({
+          type: 'omni:send-message',
+          payload: {
+            message: buildContinuationPrompt({
+              goal: switched.goal,
+              currentStatus: 'stopped — 已切换 Provider，请从下一步继续，不要重复已成功步骤。',
+              availableTools: tools.describeForPrompt({ limit: 8 }),
+              completedSteps: switched.steps.map((step) => ({
+                index: step.index,
+                title: step.title,
+                toolName: step.toolName,
+                ok: step.ok,
+                detail: step.detail,
+              })),
+              latestToolResult: switched.steps.at(-1)?.toolResult,
+            }),
+          },
+        });
+      }
+      return switched;
+    }
     if (message.type === 'omni:augment-prompt') {
       const payload = message.payload as ExtensionMessage<'omni:augment-prompt'>['payload'];
       if (!payload?.prompt.trim()) return { prompt: payload?.prompt ?? '', memoryCount: 0, skillCount: 0, toolCount: 0, projectId: null };
       const settings = await getRuntimeSettings();
       const activeProjectId = await storage.getActiveProjectId();
-      const [matches, skillMatches, projectContext] = await Promise.all([
+      const skillOverride = await storage.getSetting<{ skillId?: string | null; disableAll?: boolean }>(skillRequestOverrideKey);
+      const [matches, automaticSkillMatches, projectContext] = await Promise.all([
         settings.injectMemory
           ? memory.retrieve(payload.prompt, {
             providerId: payload.provider,
             projectId: activeProjectId ?? undefined,
           })
           : Promise.resolve([]),
-        settings.injectSkills ? skills.match(payload.prompt, { limit: 2 }) : Promise.resolve([]),
+        settings.injectSkills && !skillOverride?.disableAll ? skills.match(payload.prompt, { limit: 2 }) : Promise.resolve([]),
         settings.injectProject ? formatProjectContext(activeProjectId) : Promise.resolve(''),
       ]);
+      const forcedSkill = skillOverride?.skillId ? await skills.get(skillOverride.skillId) : undefined;
+      const skillMatches = forcedSkill?.enabled
+        ? [{ skill: forcedSkill, score: Number.POSITIVE_INFINITY }]
+        : automaticSkillMatches;
+      if (skillOverride) await storage.db.settings.delete(skillRequestOverrideKey);
       const memoryContext = settings.injectMemory ? memory.formatContext(matches) : '';
       const skillContext = settings.injectSkills ? skills.formatContext(skillMatches, payload.prompt) : '';
       const skillToolNames = skillMatches.flatMap((match) => match.skill.manifest.tools ?? []);
@@ -421,9 +537,26 @@ export default defineBackground(() => {
           ? `${skillContext}\n\n请按相关 Skill 的指引组织回答，不要提及这段系统补充。`
           : '',
         toolContext
-          ? `${toolContext}\n\n如果需要工具能力，请用自然语言说明要调用的工具与参数，不要虚构执行结果。`
+          ? `${toolContext}\n\n当且仅当需要 OmniAgent 工具时，停止普通回复并只输出一个：\n<omniagent-action>\n{"type":"tool_call","toolName":"工具名","arguments":{}}\n</omniagent-action>\n工具执行结果会自动回传。不要虚构工具执行结果。`
           : '',
       ].filter(Boolean);
+      const injectedMemories = matches.map(({ memory: item, score }) => ({
+        id: item.id,
+        summary: item.summary,
+        scope: item.scope,
+        score,
+        reason: item.pinned ? '已置顶，且与当前问题关键词匹配' : '与当前问题关键词匹配',
+      }));
+      await storage.setSetting(memoryDiagnosticKey, {
+        stage: 'memory-injected',
+        detail: injectedMemories.length
+          ? `已向 ${payload.provider} 注入 ${injectedMemories.length} 条相关记忆`
+          : `未检索到可注入 ${payload.provider} 的相关记忆`,
+        count: injectedMemories.length,
+        provider: payload.provider,
+        items: injectedMemories,
+        at: Date.now(),
+      });
       return {
         prompt: sections.length
           ? `${sections.join('\n\n')}\n\n用户当前问题：${payload.prompt}`
@@ -470,6 +603,16 @@ interface MemoryInjectionDiagnostic {
   detail: string;
   count: number;
   at: number;
+}
+
+function providerCapabilityNames(providerId: 'deepseek' | 'kimi'): string[] {
+  const capabilities = getProviderCapabilities(providerId);
+  return [
+    'conversation',
+    'message-observation',
+    'prompt-insertion',
+    ...Object.entries(capabilities).filter(([, enabled]) => enabled).map(([name]) => name),
+  ];
 }
 
 async function getActiveTab() {
@@ -529,8 +672,8 @@ async function navigateActiveTab(url: string): Promise<BrowserActionResult> {
     ok: true,
     action: 'navigate',
     detail: target,
-    url: updated.url ?? target,
-    title: updated.title ?? '',
+    url: updated?.url ?? target,
+    title: updated?.title ?? '',
   };
 }
 
@@ -558,25 +701,8 @@ function isRestrictedUrl(url: string | undefined): boolean {
 
 async function ensureMcpReady(): Promise<void> {
   if (!mcpReady) {
-    mcpReady = (async () => {
-      if (!mcp.getServer('echo')) {
-        await mcp.connect({ id: 'echo', name: 'Echo MCP', kind: 'echo' }, createEchoServer());
-      }
-      if (!mcp.getServer('notes')) {
-        await mcp.connect({ id: 'notes', name: 'Memory Notes MCP', kind: 'memory-notes' }, createMemoryNotesServer());
-      }
-      for (const tool of mcp.toToolDefinitions()) {
-        if (tools.registry.has(tool.name)) continue;
-        tools.registry.register({
-          name: tool.name,
-          description: tool.description,
-          source: 'mcp',
-          parameters: tool.parameters,
-          permissions: tool.permissions,
-          execute: async (input) => tool.execute(input),
-        } satisfies ToolDefinition);
-      }
-    })();
+    // MCP servers are user-added. Never register demo servers in production.
+    mcpReady = Promise.resolve();
   }
   await mcpReady;
 }
@@ -600,6 +726,7 @@ function toAgentTaskRecord(task: AgentTask): AgentTaskRecord {
     result: task.result ?? null,
     error: task.error ?? null,
     providerId: (task.providerId as AgentTaskRecord['providerId']) ?? null,
+    conversationId: task.conversationId ?? null,
     projectId: task.projectId ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -615,6 +742,7 @@ function fromAgentTaskRecord(record: AgentTaskRecord): AgentTask {
     result: record.result ?? undefined,
     error: record.error ?? undefined,
     providerId: record.providerId,
+    conversationId: record.conversationId,
     projectId: record.projectId,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
@@ -690,6 +818,8 @@ async function importWorkspaceData(raw: string) {
       injectSkills: parsed.settings.injectSkills ?? current.injectSkills,
       injectTools: parsed.settings.injectTools ?? current.injectTools,
       injectProject: parsed.settings.injectProject ?? current.injectProject,
+      memorySaveMode: parsed.settings.memorySaveMode ?? current.memorySaveMode,
+      browserControlEnabled: parsed.settings.browserControlEnabled ?? current.browserControlEnabled,
     });
   }
 
@@ -797,6 +927,7 @@ async function importWorkspaceData(raw: string) {
       result: typeof item.result === 'string' ? item.result : null,
       error: typeof item.error === 'string' ? item.error : null,
       providerId: item.providerId === 'deepseek' || item.providerId === 'kimi' ? item.providerId : null,
+      conversationId: typeof item.conversationId === 'string' ? item.conversationId : null,
       projectId: typeof item.projectId === 'string' ? item.projectId : null,
       createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
       updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
@@ -819,16 +950,52 @@ async function importWorkspaceData(raw: string) {
   };
 }
 
+async function handleModelToolCall(message: ExtensionMessage<'omni:response-update'>): Promise<void> {
+  const payload = message.payload;
+  if (!payload || payload.role !== 'assistant' || payload.state === 'partial' || handledModelActions.has(payload.messageId)) return;
+  const parsed = parseAgentDecision(payload.text);
+  if (!parsed.ok || parsed.decision.type !== 'tool_call') return;
+  // The first production loop deliberately exposes only OmniAgent-owned
+  // memory tools; web research stays with the provider's native abilities.
+  if (!['memory.search', 'memory.save'].includes(parsed.decision.toolName)) return;
+  handledModelActions.add(payload.messageId);
+  if (handledModelActions.size > 200) handledModelActions.clear();
+
+  const result = await tools.execute(
+    { name: parsed.decision.toolName, arguments: parsed.decision.arguments },
+    { providerId: payload.provider },
+  );
+  await sendToActiveTab({
+    type: 'omni:send-message',
+    payload: {
+      message: [
+        serializeToolResult({
+          name: parsed.decision.toolName,
+          ok: result.ok,
+          result: result.ok ? result.result : undefined,
+          error: result.ok ? undefined : result.error,
+        }),
+        '请根据这个工具结果继续回答用户。若还需要 OmniAgent 工具，只输出一个 <omniagent-action> JSON 块；否则直接给出最终答复。',
+      ].join('\n\n'),
+    },
+  });
+}
+
 async function persistPageMessage(message: ExtensionMessage<'omni:response-update'>) {
   const payload = message.payload;
-  if (!payload?.conversationId) return;
+  if (!payload) return;
   const activeProjectId = await storage.getActiveProjectId();
+  const temporaryExternalId = `temp:${payload.provider}:${payload.pageSessionId ?? 'unknown'}`;
   const conversation = await storage.getOrCreateConversation({
     providerId: payload.provider,
-    externalId: payload.conversationId,
+    externalId: payload.conversationId ?? temporaryExternalId,
     title: payload.role === 'user' ? summarizeTitle(payload.text) : null,
     projectId: activeProjectId,
   });
+  if (payload.conversationId && payload.pageSessionId) {
+    const temporary = (await storage.listConversations(payload.provider)).find((item) => item.externalId === temporaryExternalId);
+    if (temporary && temporary.id !== conversation.id) await storage.mergeConversations(temporary.id, conversation.id);
+  }
   if (payload.role === 'user' && !conversation.title) {
     await storage.updateConversationTitle(conversation.id, summarizeTitle(payload.text));
   }
@@ -839,9 +1006,59 @@ async function persistPageMessage(message: ExtensionMessage<'omni:response-updat
     content: payload.text,
     attachments: [],
   });
+  await archiveConversationTurns(conversation.id, payload.provider, conversation.projectId);
   if (payload.role === 'user') {
-    await memory.extractExplicitUserMemory(payload.text, { projectId: activeProjectId });
+    const settings = await getRuntimeSettings();
+    if (settings.memorySaveMode !== 'off') {
+      await memory.extractExplicitUserMemory(payload.text, {
+        projectId: activeProjectId,
+        policy: toMemoryWritePolicy(settings.memorySaveMode),
+      });
+    }
   }
+}
+
+async function archiveConversationTurns(conversationId: string, providerId: 'deepseek' | 'kimi', projectId: string | null): Promise<void> {
+  const messages = await storage.listMessages(conversationId);
+  const chunkSize = 8;
+  const completeChunks = Math.floor(messages.length / chunkSize);
+  for (let index = 0; index < completeChunks; index += 1) {
+    const slice = messages.slice(index * chunkSize, (index + 1) * chunkSize);
+    const first = slice[0];
+    const last = slice.at(-1);
+    if (!first || !last) continue;
+    const sourceKey = `${conversationId}:${first.id}:${last.id}`;
+    const summary = summarizeSessionChunk(slice);
+    await storage.saveSessionChunk({
+      sourceKey,
+      conversationId,
+      providerId,
+      projectId,
+      summary,
+      keywords: sessionKeywords(summary),
+      messageIds: slice.map((item) => item.id),
+      startedAt: first.createdAt,
+      endedAt: last.updatedAt,
+    });
+  }
+}
+
+function summarizeSessionChunk(messages: MessageRecord[]): string {
+  const lines = messages.map((item) => {
+    const role = item.role === 'user' ? '用户' : item.role === 'assistant' ? 'AI' : item.role;
+    const content = item.content.replace(/\s+/gu, ' ').trim();
+    return `${role}：${content.slice(0, 220)}`;
+  });
+  return lines.join('\n').slice(0, 1800);
+}
+
+function sessionKeywords(content: string): string[] {
+  const terms = new Set(content.toLocaleLowerCase().match(/[a-z0-9_]{2,}/gu) ?? []);
+  for (const group of content.match(/[\p{Script=Han}]+/gu) ?? []) {
+    const chars = [...group];
+    for (let index = 0; index < chars.length - 1; index += 1) terms.add(`${chars[index]}${chars[index + 1]}`);
+  }
+  return [...terms].slice(0, 120);
 }
 
 interface RuntimeSettings {
@@ -849,6 +1066,8 @@ interface RuntimeSettings {
   injectSkills: boolean;
   injectTools: boolean;
   injectProject: boolean;
+  memorySaveMode: 'auto' | 'confirm' | 'off';
+  browserControlEnabled: boolean;
 }
 
 async function getRuntimeSettings(): Promise<RuntimeSettings> {
@@ -858,7 +1077,21 @@ async function getRuntimeSettings(): Promise<RuntimeSettings> {
     injectSkills: stored?.injectSkills ?? true,
     injectTools: stored?.injectTools ?? true,
     injectProject: stored?.injectProject ?? true,
+    memorySaveMode: stored?.memorySaveMode ?? 'confirm',
+    browserControlEnabled: stored?.browserControlEnabled ?? false,
   };
+}
+
+function toMemoryWritePolicy(mode: RuntimeSettings['memorySaveMode']): 'review_all' | 'auto_safe' | 'manual_only' {
+  if (mode === 'auto') return 'auto_safe';
+  if (mode === 'off') return 'manual_only';
+  return 'review_all';
+}
+
+function ensureBrowserControlEnabled(): void {
+  for (const tool of [browserSnapshotTool, browserClickTool, browserTypeTool, browserScrollTool, browserNavigateTool]) {
+    if (!tools.registry.has(tool.name)) tools.registry.register(tool);
+  }
 }
 
 async function listToolHistory(): Promise<ToolHistoryItem[]> {

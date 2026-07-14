@@ -62,9 +62,121 @@ export interface MemoryRecord {
   keywords: string[];
   importance: number;
   confidence: number;
+  pinned: boolean;
   createdAt: number;
   updatedAt: number;
   lastAccessedAt: number | null;
+}
+
+export type MemoryFactStatus = 'active' | 'archived' | 'deleted';
+export type MemoryCandidateStatus = 'pending' | 'conflict' | 'rejected' | 'expired';
+export type MemorySourceKind = 'manual' | 'user_message' | 'model_tool' | 'assistant_reply' | 'migration';
+export type MemorySensitivity = 'normal' | 'personal' | 'secret';
+export type MemoryInjectionPolicy = 'always' | 'relevant' | 'never';
+
+export interface MemoryFactRecord {
+  id: string;
+  identityKey: string;
+  canonicalKey: string;
+  type: MemoryType;
+  scope: MemoryScope;
+  scopeKey: string;
+  providerId: SupportedProvider | null;
+  projectId: string | null;
+  value: string;
+  normalizedValue: string;
+  valueHash: string;
+  summary: string;
+  keywords: string[];
+  status: MemoryFactStatus;
+  sensitivity: MemorySensitivity;
+  injectionPolicy: MemoryInjectionPolicy;
+  importance: number;
+  confidence: number;
+  pinned: boolean;
+  sourceCount: number;
+  accessCount: number;
+  createdAt: number;
+  updatedAt: number;
+  lastAccessedAt: number | null;
+  archivedAt: number | null;
+  deletedAt: number | null;
+}
+
+export interface MemoryCandidateRecord {
+  id: string;
+  dedupeKey: string;
+  identityKey: string;
+  canonicalKey: string;
+  type: MemoryType;
+  scope: MemoryScope;
+  providerId: SupportedProvider | null;
+  projectId: string | null;
+  proposedValue: string;
+  normalizedValue: string;
+  valueHash: string;
+  summary: string;
+  importance: number;
+  confidence: number;
+  sensitivity: MemorySensitivity;
+  sourceKind: MemorySourceKind;
+  sourceMessageId: string | null;
+  reason: string | null;
+  status: MemoryCandidateStatus;
+  resolvedFactId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number | null;
+}
+
+export interface MemoryEvidenceRecord {
+  id: string;
+  factId: string;
+  sourceKind: MemorySourceKind;
+  sourceMessageId: string | null;
+  excerpt: string;
+  valueHash: string;
+  createdAt: number;
+}
+
+export interface MemoryRevisionRecord {
+  id: string;
+  factId: string;
+  previousValue: string;
+  nextValue: string;
+  reason: string | null;
+  sourceKind: MemorySourceKind;
+  createdAt: number;
+}
+
+export interface MemoryMigrationStateRecord {
+  key: string;
+  cursor: number;
+  completedAt: number | null;
+  updatedAt: number;
+}
+
+export interface MemoryRecallLogRecord {
+  id: string;
+  query: string;
+  factIds: string[];
+  resultCount: number;
+  createdAt: number;
+}
+
+export interface SessionChunkRecord {
+  id: string;
+  sourceKey: string;
+  conversationId: string;
+  providerId: SupportedProvider;
+  projectId: string | null;
+  summary: string;
+  keywords: string[];
+  messageIds: string[];
+  startedAt: number;
+  endedAt: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface SkillRecord {
@@ -101,6 +213,7 @@ export interface AgentTaskRecord {
   result: string | null;
   error: string | null;
   providerId: SupportedProvider | null;
+  conversationId: string | null;
   projectId: string | null;
   createdAt: number;
   updatedAt: number;
@@ -127,6 +240,13 @@ export class OmniAgentDatabase extends Dexie {
   skills!: EntityTable<SkillRecord, 'id'>;
   agentTasks!: EntityTable<AgentTaskRecord, 'id'>;
   projects!: EntityTable<ProjectRecord, 'id'>;
+  memoryFacts!: EntityTable<MemoryFactRecord, 'id'>;
+  memoryCandidates!: EntityTable<MemoryCandidateRecord, 'id'>;
+  memoryEvidence!: EntityTable<MemoryEvidenceRecord, 'id'>;
+  memoryRevisions!: EntityTable<MemoryRevisionRecord, 'id'>;
+  memoryMigrationStates!: EntityTable<MemoryMigrationStateRecord, 'key'>;
+  memoryRecallLogs!: EntityTable<MemoryRecallLogRecord, 'id'>;
+  sessionChunks!: EntityTable<SessionChunkRecord, 'id'>;
 
   constructor(name = 'omni-agent') {
     super(name);
@@ -169,6 +289,54 @@ export class OmniAgentDatabase extends Dexie {
       skills: '&id, name, enabled, source, updatedAt',
       agentTasks: '&id, status, projectId, updatedAt',
       projects: '&id, name, status, updatedAt',
+    });
+    this.version(6).stores({
+      providers: '&id, adapter, updatedAt',
+      conversations: '&id, providerId, externalId, [providerId+externalId], updatedAt',
+      messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt',
+      settings: '&key, updatedAt',
+      memories: '&id, type, scope, providerId, projectId, pinned, *keywords, updatedAt',
+      skills: '&id, name, enabled, source, updatedAt',
+      agentTasks: '&id, status, projectId, updatedAt',
+      projects: '&id, name, status, updatedAt',
+    }).upgrade(async (tx) => {
+      await tx.table('memories').toCollection().modify({ pinned: false });
+    });
+    this.version(7).stores({
+      providers: '&id, adapter, updatedAt', conversations: '&id, providerId, externalId, [providerId+externalId], updatedAt',
+      messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt', settings: '&key, updatedAt',
+      memories: '&id, type, scope, providerId, projectId, pinned, *keywords, updatedAt', skills: '&id, name, enabled, source, updatedAt',
+      agentTasks: '&id, status, providerId, conversationId, projectId, updatedAt', projects: '&id, name, status, updatedAt',
+    }).upgrade(async (tx) => { await tx.table('agentTasks').toCollection().modify({ conversationId: null }); });
+    this.version(8).stores({
+      providers: '&id, adapter, updatedAt', conversations: '&id, providerId, externalId, [providerId+externalId], updatedAt',
+      messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt', settings: '&key, updatedAt',
+      memories: '&id, type, scope, providerId, projectId, pinned, *keywords, updatedAt', skills: '&id, name, enabled, source, updatedAt',
+      agentTasks: '&id, status, providerId, conversationId, projectId, updatedAt', projects: '&id, name, status, updatedAt',
+      memoryFacts: '&id, &identityKey, canonicalKey, type, scope, scopeKey, providerId, projectId, status, pinned, *keywords, updatedAt',
+      memoryCandidates: '&id, &dedupeKey, identityKey, status, sourceKind, sourceMessageId, createdAt',
+      memoryEvidence: '&id, factId, sourceMessageId, createdAt', memoryRevisions: '&id, factId, createdAt',
+      memoryMigrationStates: '&key, updatedAt',
+    });
+    this.version(9).stores({
+      providers: '&id, adapter, updatedAt', conversations: '&id, providerId, externalId, [providerId+externalId], updatedAt',
+      messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt', settings: '&key, updatedAt',
+      memories: '&id, type, scope, providerId, projectId, pinned, *keywords, updatedAt', skills: '&id, name, enabled, source, updatedAt',
+      agentTasks: '&id, status, providerId, conversationId, projectId, updatedAt', projects: '&id, name, status, updatedAt',
+      memoryFacts: '&id, &identityKey, canonicalKey, type, scope, scopeKey, providerId, projectId, status, pinned, *keywords, updatedAt',
+      memoryCandidates: '&id, &dedupeKey, identityKey, status, sourceKind, sourceMessageId, createdAt',
+      memoryEvidence: '&id, factId, sourceMessageId, createdAt', memoryRevisions: '&id, factId, createdAt', memoryMigrationStates: '&key, updatedAt',
+      memoryRecallLogs: '&id, createdAt',
+    });
+    this.version(10).stores({
+      providers: '&id, adapter, updatedAt', conversations: '&id, providerId, externalId, [providerId+externalId], updatedAt',
+      messages: '&id, conversationId, externalId, role, [conversationId+externalId], [conversationId+createdAt], updatedAt', settings: '&key, updatedAt',
+      memories: '&id, type, scope, providerId, projectId, pinned, *keywords, updatedAt', skills: '&id, name, enabled, source, updatedAt',
+      agentTasks: '&id, status, providerId, conversationId, projectId, updatedAt', projects: '&id, name, status, updatedAt',
+      memoryFacts: '&id, &identityKey, canonicalKey, type, scope, scopeKey, providerId, projectId, status, pinned, *keywords, updatedAt',
+      memoryCandidates: '&id, &dedupeKey, identityKey, status, sourceKind, sourceMessageId, createdAt',
+      memoryEvidence: '&id, factId, sourceMessageId, createdAt', memoryRevisions: '&id, factId, createdAt', memoryMigrationStates: '&key, updatedAt',
+      memoryRecallLogs: '&id, createdAt', sessionChunks: '&id, &sourceKey, conversationId, providerId, projectId, endedAt, *keywords',
     });
   }
 }
@@ -279,9 +447,25 @@ export class OmniAgentStorage {
   }
 
   async deleteConversation(id: string): Promise<void> {
-    await this.db.transaction('rw', this.db.conversations, this.db.messages, async () => {
+    await this.db.transaction('rw', this.db.conversations, this.db.messages, this.db.sessionChunks, async () => {
       await this.db.messages.where('conversationId').equals(id).delete();
+      await this.db.sessionChunks.where('conversationId').equals(id).delete();
       await this.db.conversations.delete(id);
+    });
+  }
+
+  async mergeConversations(sourceId: string, targetId: string): Promise<void> {
+    if (sourceId === targetId) return;
+    await this.db.transaction('rw', this.db.conversations, this.db.messages, this.db.sessionChunks, async () => {
+      const source = await this.db.conversations.get(sourceId);
+      const target = await this.db.conversations.get(targetId);
+      if (!source || !target) return;
+      const messages = await this.db.messages.where('conversationId').equals(sourceId).toArray();
+      await this.db.messages.bulkPut(messages.map((message) => ({ ...message, conversationId: targetId, updatedAt: Date.now() })));
+      const chunks = await this.db.sessionChunks.where('conversationId').equals(sourceId).toArray();
+      await this.db.sessionChunks.bulkPut(chunks.map((chunk) => ({ ...chunk, conversationId: targetId, sourceKey: chunk.sourceKey.replace(sourceId, targetId), updatedAt: Date.now() })));
+      await this.db.conversations.put({ ...target, title: target.title ?? source.title, projectId: target.projectId ?? source.projectId, updatedAt: Date.now() });
+      await this.db.conversations.delete(sourceId);
     });
   }
 
@@ -293,7 +477,7 @@ export class OmniAgentStorage {
     return (await this.db.settings.get(key))?.value as T | undefined;
   }
 
-  async saveMemory(input: Omit<MemoryRecord, 'id' | 'createdAt' | 'updatedAt' | 'lastAccessedAt'> & { id?: string }): Promise<MemoryRecord> {
+  async saveMemory(input: Omit<MemoryRecord, 'id' | 'createdAt' | 'updatedAt' | 'lastAccessedAt' | 'pinned'> & { id?: string; pinned?: boolean }): Promise<MemoryRecord> {
     const now = Date.now();
     const existing = input.id ? await this.db.memories.get(input.id) : undefined;
     const memory: MemoryRecord = {
@@ -302,6 +486,7 @@ export class OmniAgentStorage {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       lastAccessedAt: existing?.lastAccessedAt ?? null,
+      pinned: input.pinned ?? existing?.pinned ?? false,
     };
     await this.db.memories.put(memory);
     return memory;
@@ -315,7 +500,7 @@ export class OmniAgentStorage {
     if (options.type) {
       rows = rows.filter((row) => row.type === options.type);
     }
-    return rows.sort((a, b) => b.updatedAt - a.updatedAt);
+    return rows.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
   }
 
   async markMemoryAccessed(id: string): Promise<void> {
@@ -327,15 +512,130 @@ export class OmniAgentStorage {
   }
 
   async clearMemories(): Promise<number> {
-    const count = await this.db.memories.count();
-    await this.db.memories.clear();
+    const count = (await this.db.memories.count()) + (await this.db.memoryFacts.count());
+    await this.db.transaction('rw', this.db.memories, this.db.memoryFacts, this.db.memoryCandidates, this.db.memoryEvidence, this.db.memoryRevisions, async () => {
+      await this.db.memories.clear();
+      await this.db.memoryFacts.clear();
+      await this.db.memoryCandidates.clear();
+      await this.db.memoryEvidence.clear();
+      await this.db.memoryRevisions.clear();
+    });
+    await this.db.memoryRecallLogs.clear();
     return count;
+  }
+
+  async listMemoryFacts(options: { status?: MemoryFactStatus; projectId?: string | null; type?: MemoryType } = {}): Promise<MemoryFactRecord[]> {
+    let rows = await this.db.memoryFacts.toArray();
+    if (options.status) rows = rows.filter((row) => row.status === options.status);
+    if (options.projectId) rows = rows.filter((row) => row.scope === 'global' || row.projectId === options.projectId);
+    if (options.type) rows = rows.filter((row) => row.type === options.type);
+    return rows.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
+  }
+
+  async getMemoryFactByIdentity(identityKey: string): Promise<MemoryFactRecord | undefined> {
+    return this.db.memoryFacts.where('identityKey').equals(identityKey).first();
+  }
+
+  async getMemoryFactDetail(id: string): Promise<{ fact: MemoryFactRecord; evidence: MemoryEvidenceRecord[]; revisions: MemoryRevisionRecord[] } | undefined> {
+    const fact = await this.db.memoryFacts.get(id);
+    if (!fact) return undefined;
+    const [evidence, revisions] = await Promise.all([
+      this.listMemoryEvidence(id),
+      this.db.memoryRevisions.where('factId').equals(id).reverse().sortBy('createdAt'),
+    ]);
+    return { fact, evidence, revisions };
+  }
+
+  async saveMemoryFact(record: MemoryFactRecord): Promise<MemoryFactRecord> {
+    await this.db.memoryFacts.put(record);
+    return record;
+  }
+
+  async saveMemoryCandidate(record: MemoryCandidateRecord): Promise<MemoryCandidateRecord> {
+    await this.db.memoryCandidates.put(record);
+    return record;
+  }
+
+  async getMemoryCandidate(id: string): Promise<MemoryCandidateRecord | undefined> {
+    return this.db.memoryCandidates.get(id);
+  }
+
+  async getMemoryCandidateByDedupeKey(dedupeKey: string): Promise<MemoryCandidateRecord | undefined> {
+    return this.db.memoryCandidates.where('dedupeKey').equals(dedupeKey).first();
+  }
+
+  async listMemoryCandidates(status?: MemoryCandidateStatus): Promise<MemoryCandidateRecord[]> {
+    const rows = status ? await this.db.memoryCandidates.where('status').equals(status).toArray() : await this.db.memoryCandidates.toArray();
+    return rows.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  async saveMemoryEvidence(record: MemoryEvidenceRecord): Promise<MemoryEvidenceRecord> {
+    await this.db.memoryEvidence.put(record);
+    return record;
+  }
+
+  async listMemoryEvidence(factId: string): Promise<MemoryEvidenceRecord[]> {
+    return (await this.db.memoryEvidence.where('factId').equals(factId).toArray()).sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  async saveMemoryRevision(record: MemoryRevisionRecord): Promise<MemoryRevisionRecord> {
+    await this.db.memoryRevisions.put(record);
+    return record;
+  }
+
+  async getMemoryMigrationState(key = 'legacy-memories'): Promise<MemoryMigrationStateRecord | undefined> {
+    return this.db.memoryMigrationStates.get(key);
+  }
+
+  async saveMemoryMigrationState(record: MemoryMigrationStateRecord): Promise<MemoryMigrationStateRecord> {
+    await this.db.memoryMigrationStates.put(record);
+    return record;
+  }
+
+  async saveMemoryRecallLog(record: MemoryRecallLogRecord): Promise<void> {
+    await this.db.memoryRecallLogs.put(record);
+    const cutoff = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    await this.db.memoryRecallLogs.where('createdAt').below(cutoff).delete();
+    const recent = await this.db.memoryRecallLogs.orderBy('createdAt').reverse().toArray();
+    if (recent.length > 100) await this.db.memoryRecallLogs.bulkDelete(recent.slice(100).map((item) => item.id));
+  }
+
+  async listMemoryRecallLogs(limit = 100): Promise<MemoryRecallLogRecord[]> {
+    return (await this.db.memoryRecallLogs.orderBy('createdAt').reverse().limit(limit).toArray());
+  }
+
+  async saveSessionChunk(input: Omit<SessionChunkRecord, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<SessionChunkRecord> {
+    const existing = await this.db.sessionChunks.where('sourceKey').equals(input.sourceKey).first();
+    const now = Date.now();
+    const chunk: SessionChunkRecord = { ...input, id: existing?.id ?? input.id ?? createId(), createdAt: existing?.createdAt ?? now, updatedAt: now };
+    await this.db.sessionChunks.put(chunk);
+    return chunk;
+  }
+
+  async listSessionChunks(options: { conversationId?: string; projectId?: string | null; limit?: number } = {}): Promise<SessionChunkRecord[]> {
+    let rows = options.conversationId
+      ? await this.db.sessionChunks.where('conversationId').equals(options.conversationId).toArray()
+      : await this.db.sessionChunks.toArray();
+    if (options.projectId) rows = rows.filter((item) => item.projectId === options.projectId);
+    return rows.sort((a, b) => b.endedAt - a.endedAt).slice(0, options.limit ?? 20);
+  }
+
+  async searchSessionChunks(query: string, options: { projectId?: string | null; limit?: number } = {}): Promise<SessionChunkRecord[]> {
+    const terms = sessionChunkKeywords(query);
+    if (!terms.length) return [];
+    const rows = await this.listSessionChunks({ projectId: options.projectId, limit: 500 });
+    return rows.map((chunk) => ({ chunk, score: chunk.keywords.filter((keyword) => terms.includes(keyword)).length }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || b.chunk.endedAt - a.chunk.endedAt)
+      .slice(0, options.limit ?? 20)
+      .map((item) => item.chunk);
   }
 
   async clearConversations(): Promise<number> {
     const count = await this.db.conversations.count();
-    await this.db.transaction('rw', this.db.conversations, this.db.messages, async () => {
+    await this.db.transaction('rw', this.db.conversations, this.db.messages, this.db.sessionChunks, async () => {
       await this.db.messages.clear();
+      await this.db.sessionChunks.clear();
       await this.db.conversations.clear();
     });
     return count;
@@ -432,3 +732,13 @@ export class OmniAgentStorage {
 }
 
 export const storage = new OmniAgentStorage();
+
+function sessionChunkKeywords(content: string): string[] {
+  const terms = new Set(content.toLocaleLowerCase().match(/[a-z0-9_]{2,}/gu) ?? []);
+  for (const group of content.match(/[\p{Script=Han}]+/gu) ?? []) {
+    const chars = [...group];
+    chars.forEach((char) => terms.add(char));
+    for (let index = 0; index < chars.length - 1; index += 1) terms.add(`${chars[index]}${chars[index + 1]}`);
+  }
+  return [...terms];
+}

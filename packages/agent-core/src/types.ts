@@ -31,6 +31,7 @@ export interface AgentTask {
   createdAt: number;
   updatedAt: number;
   providerId?: string | null;
+  conversationId?: string | null;
   projectId?: string | null;
 }
 
@@ -41,6 +42,7 @@ export interface AgentContext {
   toolContext: string;
   projectContext: string;
   providerId?: string | null;
+  conversationId?: string | null;
   projectId?: string | null;
 }
 
@@ -68,5 +70,6 @@ export interface AgentDependencies {
 export interface CreateTaskInput {
   goal: string;
   providerId?: string | null;
+  conversationId?: string | null;
   projectId?: string | null;
 }

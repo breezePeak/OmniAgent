@@ -12,6 +12,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
     "@omni-agent/agent-core": "workspace:*",
+    "@omni-agent/agent-protocol": "workspace:*",
     "@omni-agent/shared": "workspace:*",
     "@omni-agent/browser-agent": "workspace:*",
     "@omni-agent/mcp": "workspace:*",

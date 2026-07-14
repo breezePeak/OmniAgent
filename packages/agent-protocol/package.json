@@ -1,14 +1,13 @@
 {
-  "name": "@omni-agent/site-adapters",
+  "name": "@omni-agent/agent-protocol",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "test": "tsx --test test/response-observer.test.ts",
+    "test": "tsx --test test/parser.test.ts",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": { "@omni-agent/shared": "workspace:*" },
   "devDependencies": {
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"

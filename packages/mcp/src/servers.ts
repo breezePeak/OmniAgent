@@ -134,3 +134,60 @@ export function createHttpMcpServer(input: {
     },
   };
 }
+
+/** Minimal MCP Streamable HTTP client: initialize, tools/list, and tools/call. */
+export function createStreamableHttpMcpServer(input: {
+  id: string;
+  name: string;
+  endpoint: string;
+  headers?: Record<string, string>;
+  fetchImpl?: typeof fetch;
+}): McpServer {
+  const fetchImpl = input.fetchImpl ?? globalThis.fetch?.bind(globalThis);
+  let initialized = false;
+  let requestId = 0;
+  const request = async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
+    if (!fetchImpl) throw new Error('fetch is unavailable');
+    const response = await fetchImpl(input.endpoint, {
+      method: 'POST',
+      headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json', ...input.headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: ++requestId, method, ...(params ? { params } : {}) }),
+    });
+    if (!response.ok) throw new Error(`MCP ${method} failed: ${response.status}`);
+    const payload = await response.json() as { result?: unknown; error?: { message?: string } };
+    if (payload.error) throw new Error(payload.error.message || `MCP ${method} failed`);
+    return payload.result;
+  };
+  const ensureInitialized = async () => {
+    if (initialized) return;
+    await request('initialize', {
+      protocolVersion: '2025-03-26',
+      capabilities: {},
+      clientInfo: { name: 'OmniAgent', version: '0.1.0' },
+    });
+    initialized = true;
+  };
+  return {
+    info: { id: input.id, name: input.name, version: '1.0.0', description: `MCP Streamable HTTP: ${input.endpoint}` },
+    async listTools() {
+      await ensureInitialized();
+      const result = await request('tools/list') as { tools?: Array<{ name: string; description?: string; inputSchema?: { properties?: Record<string, { type?: string; description?: string }>; required?: string[] } }> };
+      return (result.tools ?? []).map((tool) => ({
+        name: tool.name,
+        description: tool.description ?? tool.name,
+        parameters: Object.entries(tool.inputSchema?.properties ?? {}).map(([name, schema]) => ({
+          name, type: normalizeParameterType(schema.type), description: schema.description ?? '', required: tool.inputSchema?.required?.includes(name),
+        })),
+      }));
+    },
+    async callTool(call) {
+      await ensureInitialized();
+      const result = await request('tools/call', { name: call.name, arguments: call.arguments ?? {} });
+      return { ok: true, content: result };
+    },
+  };
+}
+
+function normalizeParameterType(value: string | undefined): McpToolDefinition['parameters'][number]['type'] {
+  return value === 'number' || value === 'boolean' || value === 'object' || value === 'array' ? value : 'string';
+}

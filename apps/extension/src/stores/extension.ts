@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import type { AdapterStatus, ConversationTurn, ExtensionMessage, ExtensionMessageMap } from '@omni-agent/shared';
-import type { ConversationRecord, MessageRecord, MemoryRecord, ProjectRecord } from '@omni-agent/storage';
-import type { SkillDefinition } from '@omni-agent/skills';
+import type { ConversationRecord, MemoryEvidenceRecord, MemoryCandidateRecord, MemoryFactRecord, MemoryRecord, MemoryRevisionRecord, MessageRecord, ProjectRecord, SessionChunkRecord } from '@omni-agent/storage';
+import type { SkillDefinition, SkillInput } from '@omni-agent/skills';
 import type { ToolDescriptor, ToolResult } from '@omni-agent/tools';
 import type { AgentTask } from '@omni-agent/agent-core';
 
@@ -20,6 +20,14 @@ interface MemoryInjectionDiagnostic {
   detail: string;
   count: number;
   at: number;
+  provider?: 'deepseek' | 'kimi';
+  items?: Array<{
+    id: string;
+    summary: string;
+    scope: string;
+    score: number;
+    reason: string;
+  }>;
 }
 
 interface RuntimeSettings {
@@ -27,6 +35,8 @@ interface RuntimeSettings {
   injectSkills: boolean;
   injectTools: boolean;
   injectProject: boolean;
+  memorySaveMode: 'auto' | 'confirm' | 'off';
+  browserControlEnabled: boolean;
 }
 
 const unsupported: AdapterStatus = {
@@ -59,19 +69,31 @@ export const useExtensionStore = defineStore('extension', {
     memories: [] as MemoryRecord[],
     memoryTotalCount: 0,
     memoryDraft: '',
+    memoryScopeDraft: 'global' as 'global' | 'provider' | 'project',
+    memoryTypeDraft: 'knowledge' as MemoryRecord['type'],
+    memoryEditId: '',
+    memoryEditContent: '',
     memoryQuery: '',
     memoryTypeFilter: '' as '' | MemoryRecord['type'],
     memoryProjectOnly: false,
     memoryLoading: false,
     memoryError: '',
+    memoryMessage: '',
     memoryDiagnostic: null as MemoryInjectionDiagnostic | null,
+    memoryCandidates: [] as MemoryCandidateRecord[],
+    selectedMemoryId: '',
+    memoryCandidateEdit: '',
+    selectedMemoryDetail: null as { fact: MemoryFactRecord; evidence: MemoryEvidenceRecord[]; revisions: MemoryRevisionRecord[] } | null,
+    sessionChunks: [] as SessionChunkRecord[],
     skills: [] as SkillDefinition[],
+    skillTemplates: [] as SkillInput[],
     skillQuery: '',
-    matchedSkills: [] as SkillDefinition[],
+    matchedSkills: [] as Array<{ skill: SkillDefinition; score: number }>,
     skillDraftName: '',
     skillDraftDescription: '',
     skillDraftPrompt: '',
     skillDraftTriggers: '',
+    skillOverrideId: '',
     skillLoading: false,
     skillError: '',
     agentPollTimer: null as ReturnType<typeof setInterval> | null,
@@ -99,6 +121,7 @@ export const useExtensionStore = defineStore('extension', {
     selectedAgentTaskId: '',
     agentStatusFilter: '' as '' | AgentTask['status'],
     agentGoalDraft: '',
+    agentProviderDraft: '' as '' | 'deepseek' | 'kimi',
     agentLoading: false,
     agentError: '',
     projects: [] as ProjectRecord[],
@@ -113,6 +136,8 @@ export const useExtensionStore = defineStore('extension', {
       injectSkills: true,
       injectTools: true,
       injectProject: true,
+      memorySaveMode: 'confirm',
+      browserControlEnabled: false,
     } as RuntimeSettings,
     settingsLoading: false,
     settingsError: '',
@@ -262,6 +287,66 @@ export const useExtensionStore = defineStore('extension', {
         this.memoryLoading = false;
       }
     },
+    async refreshMemoryCandidates() {
+      try {
+        this.memoryCandidates = await browser.runtime.sendMessage<ExtensionMessage<'omni:list-memory-candidates'>, MemoryCandidateRecord[]>({
+          type: 'omni:list-memory-candidates',
+        });
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '读取待确认记忆失败';
+      }
+    },
+    async refreshSessionChunks() {
+      try {
+        const projectId = this.memoryProjectOnly ? (this.activeProjectId || null) : undefined;
+        this.sessionChunks = this.memoryQuery.trim()
+          ? await browser.runtime.sendMessage<ExtensionMessage<'omni:search-session-chunks'>, SessionChunkRecord[]>({ type: 'omni:search-session-chunks', payload: { query: this.memoryQuery.trim(), projectId, limit: 6 } })
+          : await browser.runtime.sendMessage<ExtensionMessage<'omni:list-session-chunks'>, SessionChunkRecord[]>({ type: 'omni:list-session-chunks', payload: { projectId, limit: 6 } });
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '读取会话归档失败';
+      }
+    },
+    async selectMemory(id: string) {
+      this.selectedMemoryId = this.selectedMemoryId === id ? '' : id;
+      this.selectedMemoryDetail = null;
+      if (!this.selectedMemoryId) return;
+      try {
+        this.selectedMemoryDetail = await browser.runtime.sendMessage<
+          ExtensionMessage<'omni:get-memory-detail'>,
+          { fact: MemoryFactRecord; evidence: MemoryEvidenceRecord[]; revisions: MemoryRevisionRecord[] } | undefined
+        >({ type: 'omni:get-memory-detail', payload: { id } }) ?? null;
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '读取记忆详情失败';
+      }
+    },
+    async acceptMemoryCandidate(candidate: MemoryCandidateRecord) {
+      this.memoryLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:accept-memory-candidate'>>({
+          type: 'omni:accept-memory-candidate',
+          payload: { id: candidate.id, value: this.memoryCandidateEdit.trim() || undefined },
+        });
+        this.memoryCandidateEdit = '';
+        this.memoryMessage = '已保存到长期记忆';
+        await Promise.all([this.refreshMemories(), this.refreshMemoryCandidates()]);
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '确认记忆失败';
+      } finally {
+        this.memoryLoading = false;
+      }
+    },
+    async rejectMemoryCandidate(id: string) {
+      this.memoryLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:reject-memory-candidate'>>({ type: 'omni:reject-memory-candidate', payload: { id } });
+        this.memoryMessage = '已忽略该候选记忆';
+        await this.refreshMemoryCandidates();
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '忽略候选记忆失败';
+      } finally {
+        this.memoryLoading = false;
+      }
+    },
     async refreshMemoryDiagnostic() {
       this.memoryDiagnostic = await browser.runtime.sendMessage(
         { type: 'omni:get-memory-diagnostic' } as unknown as ExtensionMessage,
@@ -274,7 +359,13 @@ export const useExtensionStore = defineStore('extension', {
       try {
         await browser.runtime.sendMessage<ExtensionMessage<'omni:save-memory'>, MemoryRecord>({
           type: 'omni:save-memory',
-          payload: { content },
+          payload: {
+            content,
+            type: this.memoryTypeDraft,
+            scope: this.memoryScopeDraft,
+            providerId: this.memoryScopeDraft === 'provider' ? this.adapter.provider : null,
+            projectId: this.memoryScopeDraft === 'project' ? (this.activeProjectId || null) : null,
+          },
         });
         this.memoryDraft = '';
         await this.refreshMemories();
@@ -294,6 +385,45 @@ export const useExtensionStore = defineStore('extension', {
         await this.refreshMemories();
       } catch (error) {
         this.memoryError = error instanceof Error ? error.message : '删除记忆失败';
+      } finally {
+        this.memoryLoading = false;
+      }
+    },
+    beginMemoryEdit(memory: MemoryRecord) {
+      this.memoryEditId = memory.id;
+      this.memoryEditContent = memory.content;
+    },
+    cancelMemoryEdit() {
+      this.memoryEditId = '';
+      this.memoryEditContent = '';
+    },
+    async saveMemoryEdit(memory: MemoryRecord) {
+      const content = this.memoryEditContent.trim();
+      if (!content) return;
+      this.memoryLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:update-memory'>, MemoryRecord>({
+          type: 'omni:update-memory',
+          payload: { id: memory.id, content },
+        });
+        this.cancelMemoryEdit();
+        await this.refreshMemories();
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '更新记忆失败';
+      } finally {
+        this.memoryLoading = false;
+      }
+    },
+    async toggleMemoryPinned(memory: MemoryRecord) {
+      this.memoryLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:update-memory'>, MemoryRecord>({
+          type: 'omni:update-memory',
+          payload: { id: memory.id, pinned: !memory.pinned },
+        });
+        await this.refreshMemories();
+      } catch (error) {
+        this.memoryError = error instanceof Error ? error.message : '更新置顶状态失败';
       } finally {
         this.memoryLoading = false;
       }
@@ -329,6 +459,42 @@ export const useExtensionStore = defineStore('extension', {
         this.skillLoading = false;
       }
     },
+    async refreshSkillTemplates() {
+      this.skillTemplates = await browser.runtime.sendMessage<
+        ExtensionMessage<'omni:list-skill-templates'>,
+        SkillInput[]
+      >({ type: 'omni:list-skill-templates' });
+    },
+    async installSkillTemplate(id: string) {
+      this.skillLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:install-skill-template'>, SkillDefinition>({
+          type: 'omni:install-skill-template',
+          payload: { id },
+        });
+        await this.refreshSkills();
+        this.skillError = '';
+      } catch (error) {
+        this.skillError = error instanceof Error ? error.message : '安装 Skill 模板失败';
+      } finally {
+        this.skillLoading = false;
+      }
+    },
+    async setSkillRequestOverride(skillId?: string, disableAll = false) {
+      this.skillLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:set-skill-request-override'>, { ok: boolean }>({
+          type: 'omni:set-skill-request-override',
+          payload: { skillId: skillId || null, disableAll },
+        });
+        this.skillOverrideId = disableAll ? '__disabled__' : (skillId || '');
+        this.skillError = disableAll ? '下一次发送将禁用所有 Skill' : '下一次发送将强制使用所选 Skill';
+      } catch (error) {
+        this.skillError = error instanceof Error ? error.message : '设置本次 Skill 失败';
+      } finally {
+        this.skillLoading = false;
+      }
+    },
     async matchSkills() {
       const query = this.skillQuery.trim();
       if (!query) {
@@ -344,7 +510,7 @@ export const useExtensionStore = defineStore('extension', {
           type: 'omni:match-skills',
           payload: { query, limit: 8 },
         });
-        this.matchedSkills = matches.map((item) => item.skill);
+        this.matchedSkills = matches;
         this.skillError = '';
       } catch (error) {
         this.skillError = error instanceof Error ? error.message : '匹配 Skill 失败';
@@ -525,6 +691,21 @@ export const useExtensionStore = defineStore('extension', {
         this.memoryLoading = false;
       }
     },
+    async deduplicateMemories() {
+      this.memoryLoading = true;
+      try {
+        const result = await browser.runtime.sendMessage<ExtensionMessage<'omni:deduplicate-memories'>, { ok: boolean; count: number }>({
+          type: 'omni:deduplicate-memories',
+        });
+        await this.refreshMemories();
+        this.memoryMessage = result.count ? `发现 ${result.count} 条旧记录需要检查，不会自动删除` : '没有发现重复记忆';
+      } catch (error) {
+        this.memoryMessage = '';
+        this.memoryError = error instanceof Error ? error.message : '记忆去重失败';
+      } finally {
+        this.memoryLoading = false;
+      }
+    },
     async clearConversations() {
       this.storageLoading = true;
       try {
@@ -674,6 +855,22 @@ export const useExtensionStore = defineStore('extension', {
         await this.refreshAgentTasks();
       } catch (error) {
         this.agentError = error instanceof Error ? error.message : '删除任务失败';
+      } finally {
+        this.agentLoading = false;
+      }
+    },
+    async switchSelectedAgentProvider() {
+      if (!this.selectedAgentTaskId || !this.agentProviderDraft) return;
+      this.agentLoading = true;
+      try {
+        await browser.runtime.sendMessage<ExtensionMessage<'omni:switch-agent-provider'>, AgentTask>({
+          type: 'omni:switch-agent-provider',
+          payload: { taskId: this.selectedAgentTaskId, providerId: this.agentProviderDraft },
+        });
+        await this.refreshAgentTasks();
+        this.agentError = '';
+      } catch (error) {
+        this.agentError = error instanceof Error ? error.message : '切换 Provider 失败';
       } finally {
         this.agentLoading = false;
       }

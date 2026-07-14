@@ -40,7 +40,7 @@ export interface McpServerConfig {
   name: string;
   enabled?: boolean;
   /** Built-in server kind for the first MVP. */
-  kind: 'memory-notes' | 'echo' | 'http';
+  kind: 'memory-notes' | 'echo' | 'http' | 'streamable-http';
   endpoint?: string;
   headers?: Record<string, string>;
 }

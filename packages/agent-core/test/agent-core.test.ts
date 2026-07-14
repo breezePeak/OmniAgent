@@ -159,3 +159,17 @@ test('hydrates persisted tasks and retries failed tools', async () => {
   assert.equal(attempts, 2);
   assert.ok(changes.includes('planning') || changes.includes('completed'));
 });
+
+test('switches provider without discarding completed task steps', async () => {
+  const runtime = new AgentRuntime({
+    sources: { describeTools: () => '' },
+    executeTool: async () => ({ ok: true }),
+  });
+  const task = await runtime.createTask({ goal: '跨平台继续', providerId: 'deepseek', conversationId: 'deepseek-chat' });
+  task.steps.push({ id: 'done-1', index: 0, type: 'tool', title: '已完成步骤', createdAt: Date.now(), ok: true });
+
+  const switched = await runtime.switchProvider({ taskId: task.id, providerId: 'kimi', conversationId: 'kimi-chat' });
+  assert.equal(switched.providerId, 'kimi');
+  assert.equal(switched.conversationId, 'kimi-chat');
+  assert.equal(switched.steps.length, 1);
+});

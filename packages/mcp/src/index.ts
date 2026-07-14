@@ -11,6 +11,7 @@ export type {
 export {
   createEchoServer,
   createHttpMcpServer,
+  createStreamableHttpMcpServer,
   createMemoryNotesServer,
 } from './servers.js';
 export {

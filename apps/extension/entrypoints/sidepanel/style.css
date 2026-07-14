@@ -2,21 +2,62 @@
 
 :root { color: #182230; background: #f7f8fa; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 body { margin: 0; min-width: 320px; }
-.panel-shell { padding: 28px 20px; }
-.hero { margin-bottom: 24px; }
+.panel-shell { padding: 20px; }
+.hero { margin-bottom: 8px; }
 .eyebrow { margin: 0 0 8px; color: #64748b; font-size: 12px; font-weight: 700; letter-spacing: .12em; }
 h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .description { color: #64748b; }
 .active-project { margin: 8px 0 0; color: #0f766e; font-size: 12px; font-weight: 600; }
 .active-project.muted { color: #94a3b8; font-weight: 500; }
 .overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 16px; }
-.overview-card { padding: 10px 8px; border-radius: 10px; background: #f1f5f9; text-align: center; }
+.overview-card {
+  min-height: 76px;
+  padding: 10px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+  touch-action: manipulation;
+  transition: background-color .18s ease, border-color .18s ease, transform .18s ease;
+}
+.overview-card:hover { background: #e9f1fb; border-color: #bfdbfe; }
+.overview-card:active { transform: scale(.98); }
+.overview-card:focus-visible, .quick-card:focus-visible, .settings-link:focus-visible { outline: 3px solid #60a5fa; outline-offset: 2px; }
 .overview-card strong { display: block; font-size: 18px; color: #0f172a; }
 .overview-card span { color: #64748b; font-size: 11px; letter-spacing: .04em; }
+.quick-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 76px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+  color: #1e3a5f;
+  cursor: pointer;
+  text-align: left;
+  touch-action: manipulation;
+  transition: background-color .18s ease, border-color .18s ease, transform .18s ease;
+}
+.quick-card:hover { border-color: #93c5fd; background: #eff6ff; }
+.quick-card:active { transform: scale(.99); }
+.quick-card-label { color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.quick-card strong { font-size: 16px; }
+.quick-card span:last-child { color: #64748b; font-size: 12px; }
+.settings-link { min-height: 44px; margin-top: 8px; padding: 0; border: 0; background: transparent; color: #475569; cursor: pointer; font: inherit; font-size: 13px; }
+.settings-link:hover { color: #2563eb; }
+.detail-header { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 8px; }
+.detail-header h1 { margin: 0; font-size: 20px; line-height: 1.2; letter-spacing: -.02em; }
+.back-button { min-width: 72px; min-height: 44px; padding-inline: 4px; }
 .preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .detected-host { margin: 12px 0 0; color: #64748b; font-size: 12px; overflow-wrap: anywhere; }
 .refresh { margin-top: 16px; }
 .capability-card { margin-top: 24px; padding-top: 20px; border-top: 1px solid #e5e7eb; }
+.capability-card.detail-card { margin-top: 0; padding-top: 12px; }
 .capability-card h2 { margin: 0 0 12px; font-size: 14px; }
 .primary-action { width: 100%; margin-top: 12px; }
 .action-error { margin-top: 12px; }
@@ -34,7 +75,20 @@ h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .stored-message p { margin: 4px 0 0; color: #334155; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 .memory-input { margin-top: 12px; }
 .memory-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
+.memory-diagnostic-list { margin-top: 8px; }
 .memory-list li { padding: 10px; border-radius: 8px; background: #f8fafc; }
+.memory-card { cursor: pointer; border: 1px solid transparent; transition: border-color .16s ease, background-color .16s ease; }
+.memory-card:hover { border-color: #bfdbfe; background: #f0f7ff; }
+.memory-detail { margin-top: 10px; padding-top: 10px; border-top: 1px solid #dbeafe; }
+.memory-detail strong { color: #1e3a5f; font-size: 12px; }
+.memory-candidate-section { margin-top: 16px; padding: 12px; border: 1px solid #fde68a; border-radius: 10px; background: #fffbeb; }
+.compact-heading { margin-bottom: 8px; }
+.compact-heading h3 { margin: 0; color: #92400e; font-size: 13px; }
+.memory-candidate-card { margin-top: 8px; padding: 10px; border-radius: 8px; background: rgba(255,255,255,.72); }
+.session-archive-section { margin-top: 16px; padding: 12px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; }
+.session-archive-section h3 { margin: 0; color: #1e3a5f; font-size: 13px; }
+.session-chunk-card { margin-top: 8px; padding: 10px; border-radius: 8px; background: #fff; }
+.session-chunk-card p { margin: 4px 0 0; color: #475569; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 .memory-list p { margin: 4px 0 0; color: #334155; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 .skill-input { margin-top: 10px; }
 .skill-list { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
@@ -43,6 +97,7 @@ h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .skill-item-header strong { display: block; margin-top: 2px; font-size: 13px; }
 .skill-list p { margin: 6px 0 0; color: #334155; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
 .skill-triggers { color: #64748b !important; font-size: 12px !important; }
+.skill-template-heading { margin-top: 20px; }
 .capability-card .response-text { margin-top: 8px; }
 .agent-actions { display: flex; gap: 8px; margin-top: 12px; }
 .agent-actions .el-button { flex: 1; }

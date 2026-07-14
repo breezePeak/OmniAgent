@@ -148,3 +148,24 @@ test('stores providers, conversations, messages, and settings locally', async (t
   assert.ok((await storage.clearAgentTasks()) >= 1);
   assert.equal((await storage.listAgentTasks()).length, 0);
 });
+
+test('keeps local session chunks with their conversation lifecycle', async (t) => {
+  const storage = createStorage();
+  t.after(() => storage.db.delete());
+  const conversation = await storage.getOrCreateConversation({ providerId: 'deepseek', externalId: 'session-archive' });
+  await storage.saveSessionChunk({
+    sourceKey: `${conversation.id}:one:eight`,
+    conversationId: conversation.id,
+    providerId: 'deepseek',
+    projectId: null,
+    summary: '用户讨论了 pnpm 工作区设置。',
+    keywords: ['pnpm', '工作区'],
+    messageIds: ['one', 'eight'],
+    startedAt: 1,
+    endedAt: 2,
+  });
+  assert.equal((await storage.listSessionChunks({ conversationId: conversation.id })).length, 1);
+  assert.equal((await storage.searchSessionChunks('pnpm')).length, 1);
+  await storage.deleteConversation(conversation.id);
+  assert.equal((await storage.listSessionChunks({ conversationId: conversation.id })).length, 0);
+});

@@ -1,5 +1,5 @@
 import type { McpServer, McpServerConfig, McpToolDefinition, RegisteredMcpServer } from './types.js';
-import { createEchoServer, createHttpMcpServer, createMemoryNotesServer } from './servers.js';
+import { createEchoServer, createHttpMcpServer, createMemoryNotesServer, createStreamableHttpMcpServer } from './servers.js';
 
 export type ToolLike = {
   name: string;
@@ -98,6 +98,10 @@ function createServerFromConfig(config: McpServerConfig): McpServer {
       endpoint: config.endpoint,
       headers: config.headers,
     });
+  }
+  if (config.kind === 'streamable-http') {
+    if (!config.endpoint) throw new Error('Streamable HTTP MCP endpoint is required');
+    return createStreamableHttpMcpServer({ id: config.id, name: config.name, endpoint: config.endpoint, headers: config.headers });
   }
   throw new Error(`Unsupported MCP server kind: ${(config as McpServerConfig).kind}`);
 }

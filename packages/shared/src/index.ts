@@ -19,15 +19,39 @@ export interface ExtensionMessageMap {
   'omni:conversation-snapshot': Record<string, never>;
   'omni:list-conversations': { providerId?: SupportedProvider; projectId?: string | null };
   'omni:list-messages': { conversationId: string };
+  'omni:list-session-chunks': { projectId?: string | null; limit?: number };
+  'omni:search-session-chunks': { query: string; projectId?: string | null; limit?: number };
   'omni:export-data': Record<string, never>;
   'omni:import-data': { payload: string };
   'omni:list-memories': { projectId?: string | null; type?: string };
   'omni:search-memories': { query: string; limit?: number; projectId?: string | null };
-  'omni:save-memory': { content: string };
+  'omni:save-memory': {
+    content: string;
+    type?: string;
+    scope?: 'global' | 'provider' | 'project';
+    providerId?: SupportedProvider | null;
+    projectId?: string | null;
+  };
+  'omni:update-memory': {
+    id: string;
+    content?: string;
+    type?: string;
+    scope?: 'global' | 'provider' | 'project';
+    providerId?: SupportedProvider | null;
+    projectId?: string | null;
+    pinned?: boolean;
+  };
   'omni:delete-memory': { id: string };
+  'omni:get-memory-detail': { id: string };
+  'omni:list-memory-candidates': { status?: 'pending' | 'conflict' | 'rejected' | 'expired' };
+  'omni:accept-memory-candidate': { id: string; value?: string };
+  'omni:reject-memory-candidate': { id: string };
   'omni:delete-conversation': { conversationId: string };
   'omni:delete-skill': { id: string };
   'omni:list-skills': Record<string, never>;
+  'omni:list-skill-templates': Record<string, never>;
+  'omni:install-skill-template': { id: string };
+  'omni:set-skill-request-override': { skillId?: string | null; disableAll?: boolean };
   'omni:register-skill': {
     name: string;
     description: string;
@@ -42,6 +66,7 @@ export interface ExtensionMessageMap {
   'omni:list-tool-history': Record<string, never>;
   'omni:clear-tool-history': Record<string, never>;
   'omni:clear-memories': Record<string, never>;
+  'omni:deduplicate-memories': Record<string, never>;
   'omni:clear-conversations': Record<string, never>;
   'omni:clear-agent-tasks': Record<string, never>;
   'omni:execute-tool': {
@@ -88,6 +113,7 @@ export interface ExtensionMessageMap {
   'omni:pause-agent-task': { taskId: string };
   'omni:resume-agent-task': { taskId: string };
   'omni:delete-agent-task': { taskId: string };
+  'omni:switch-agent-provider': { taskId: string; providerId: SupportedProvider; conversationId?: string | null };
   'omni:list-projects': Record<string, never>;
   'omni:save-project': {
     id?: string;
@@ -105,6 +131,8 @@ export interface ExtensionMessageMap {
     injectSkills?: boolean;
     injectTools?: boolean;
     injectProject?: boolean;
+    memorySaveMode?: 'auto' | 'confirm' | 'off';
+    browserControlEnabled?: boolean;
   };
   'omni:augment-prompt': { provider: SupportedProvider; prompt: string };
   'omni:insert-prompt': { message: string };
@@ -115,6 +143,8 @@ export interface ExtensionMessageMap {
     text: string;
     messageId: string;
     conversationId: string | null;
+    pageSessionId?: string;
+    state?: 'partial' | 'settled';
   };
 }
 

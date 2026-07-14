@@ -1,5 +1,6 @@
 import type { ConversationTurn } from '@omni-agent/shared';
-import type { ObservedMessage, SiteAdapter } from './index.js';
+import { ResponseObserver } from './response-observer.js';
+import type { ModelResponse, ObservedMessage, SiteAdapter } from './index.js';
 
 export interface DomAdapterOptions {
   id: string;
@@ -83,6 +84,17 @@ export class DomSiteAdapter implements SiteAdapter {
       characterData: true,
     });
     return () => observer.disconnect();
+  }
+
+  observeResponse(callback: (response: ModelResponse) => void): () => void {
+    const responseObserver = new ResponseObserver(callback, {
+      getConversationId: () => this.getConversationId(),
+    });
+    const stopMessages = this.observeMessages((message) => responseObserver.observe(message));
+    return () => {
+      stopMessages();
+      responseObserver.dispose();
+    };
   }
 
   getConversationId(url = window.location.href): string | null {

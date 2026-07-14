@@ -19,17 +19,25 @@ export class SkillService {
 
   async ensureReady(): Promise<void> {
     if (this.seeded) return;
-    const stored = await this.repository.listSkills();
-    if (!stored.length) {
-      for (const skill of builtinSkills) {
-        await this.repository.saveSkill(toDefinition(skill));
-      }
-    }
     this.registry.clear();
     for (const skill of await this.repository.listSkills()) {
       this.registry.register(skill);
     }
     this.seeded = true;
+  }
+
+  /** Built-in examples are templates, never implicitly installed user skills. */
+  listTemplates(): readonly SkillInput[] {
+    return builtinSkills;
+  }
+
+  async installTemplate(id: string): Promise<SkillDefinition> {
+    await this.ensureReady();
+    const template = builtinSkills.find((skill) => skill.id === id);
+    if (!template) throw new Error(`Skill template not found: ${id}`);
+    const existing = this.registry.get(id);
+    if (existing) return existing;
+    return this.register({ ...template, source: 'builtin' });
   }
 
   async list(options: { enabledOnly?: boolean } = {}): Promise<SkillDefinition[]> {

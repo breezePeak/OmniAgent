@@ -16,6 +16,9 @@ importers:
       '@omni-agent/agent-core':
         specifier: workspace:*
         version: link:../../packages/agent-core
+      '@omni-agent/agent-protocol':
+        specifier: workspace:*
+        version: link:../../packages/agent-protocol
       '@omni-agent/browser-agent':
         specifier: workspace:*
         version: link:../../packages/browser-agent
@@ -75,6 +78,15 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/agent-protocol:
+    devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/browser-agent:
     devDependencies:
       tsx:
@@ -124,6 +136,9 @@ importers:
         specifier: workspace:*
         version: link:../shared
     devDependencies:
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

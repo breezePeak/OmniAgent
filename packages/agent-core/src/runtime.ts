@@ -70,6 +70,7 @@ export class AgentRuntime {
       createdAt: now,
       updatedAt: now,
       providerId: input.providerId ?? null,
+      conversationId: input.conversationId ?? null,
       projectId: input.projectId ?? null,
     };
     if (!task.goal) throw new Error('任务目标不能为空');
@@ -166,6 +167,19 @@ export class AgentRuntime {
     const task = this.requireTask(id);
     if (task.status === 'completed' || task.status === 'failed') return task;
     return this.runTask(task.id);
+  }
+
+  async switchProvider(input: { taskId: string; providerId: string; conversationId?: string | null }): Promise<AgentTask> {
+    const task = this.requireTask(input.taskId);
+    if (task.status === 'running' || task.status === 'planning' || task.status === 'waiting_tool') {
+      this.paused.add(task.id);
+      setTaskStatus(task, 'stopped');
+    }
+    task.providerId = input.providerId;
+    task.conversationId = input.conversationId ?? null;
+    task.updatedAt = Date.now();
+    await this.emitChange(task);
+    return task;
   }
 
   async deleteTask(id: string): Promise<void> {

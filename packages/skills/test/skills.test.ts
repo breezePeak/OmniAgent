@@ -68,14 +68,15 @@ function toDefinition(record: Awaited<ReturnType<OmniAgentStorage['listSkills']>
   };
 }
 
-test('seeds builtin skills and matches research requests', async (t) => {
+test('keeps builtin skills as templates until a user installs one', async (t) => {
   const { storage, service } = createService();
   t.after(() => storage.db.delete());
 
   const skills = await service.list();
-  assert.ok(skills.length >= 3);
-  assert.ok(skills.some((skill) => skill.id === 'research-agent'));
+  assert.deepEqual(skills, []);
+  assert.ok(service.listTemplates().some((skill) => skill.id === 'research-agent'));
 
+  await service.installTemplate('research-agent');
   const matches = await service.match('请帮我调研 OmniAgent 的竞品');
   assert.ok(matches.length >= 1);
   assert.equal(matches[0]?.skill.id, 'research-agent');
@@ -115,7 +116,7 @@ test('invokes a skill by id', async (t) => {
   const { storage, service } = createService();
   t.after(() => storage.db.delete());
 
-  await service.ensureReady();
+  await service.installTemplate('concise-reply');
   const context = await service.invoke('concise-reply', '请简洁回答');
   assert.match(context, /omniagent-skill/);
   assert.match(context, /简洁/);

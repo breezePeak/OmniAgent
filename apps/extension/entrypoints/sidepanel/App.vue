@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { ToolResult } from '@omni-agent/tools';
 import { useExtensionStore } from '../../src/stores/extension';
 
@@ -52,14 +52,31 @@ const selectedAgentTask = computed(
 const activeProject = computed(
   () => extension.projects.find((project) => project.id === extension.activeProjectId) ?? null,
 );
+type PanelId = 'overview' | 'chat' | 'conversations' | 'memory' | 'skills' | 'tools' | 'tasks' | 'projects' | 'settings';
+
+const activePanel = ref<PanelId>('overview');
+const panelTitles: Record<Exclude<PanelId, 'overview'>, string> = {
+  chat: '当前 AI',
+  conversations: '本地会话',
+  memory: '长期记忆',
+  skills: 'Skills',
+  tools: '工具与 MCP',
+  tasks: 'Agent 任务',
+  projects: '项目上下文',
+  settings: '设置与备份',
+};
 const overviewStats = computed(() => [
-  { label: '记忆', value: extension.memoryTotalCount },
-  { label: 'Skill', value: extension.skills.length },
-  { label: '工具', value: extension.tools.length },
-  { label: '任务', value: extension.agentTaskTotalCount },
-  { label: '会话', value: extension.savedConversations.length },
-  { label: '项目', value: extension.projects.length },
+  { id: 'memory' as const, label: '记忆', value: extension.memoryTotalCount },
+  { id: 'skills' as const, label: 'Skill', value: extension.skills.length },
+  { id: 'tools' as const, label: '工具', value: extension.tools.length },
+  { id: 'tasks' as const, label: '任务', value: extension.agentTaskTotalCount },
+  { id: 'conversations' as const, label: '会话', value: extension.savedConversations.length },
+  { id: 'projects' as const, label: '项目', value: extension.projects.length },
 ]);
+
+function openPanel(panel: Exclude<PanelId, 'overview'>) {
+  activePanel.value = panel;
+}
 const agentPresets = [
   '请记住：我喜欢简洁的中文回复，并搜索记忆 简洁',
   '打开 https://github.com 并抓取页面快照',
@@ -77,8 +94,11 @@ onMounted(() => {
   extension.refreshAdapter();
   extension.refreshSavedConversations();
   extension.refreshMemories();
+  extension.refreshMemoryCandidates();
+  extension.refreshSessionChunks();
   extension.refreshMemoryDiagnostic();
   extension.refreshSkills();
+  extension.refreshSkillTemplates();
   extension.refreshTools();
   extension.refreshMcpServers();
   extension.refreshAgentTasks();
@@ -94,30 +114,47 @@ onUnmounted(() => {
 
 <template>
   <main class="panel-shell">
-    <section class="hero">
+    <section v-if="activePanel === 'overview'" class="hero">
       <p class="eyebrow">OMNIAGENT</p>
       <h1>One memory.<br />Every AI.</h1>
       <p class="description">{{ status }}</p>
       <p v-if="activeProject" class="active-project">活动项目：{{ activeProject.name }}</p>
       <p v-else class="active-project muted">未设置活动项目</p>
       <div class="overview-grid">
-        <div v-for="item in overviewStats" :key="item.label" class="overview-card">
+        <button
+          v-for="item in overviewStats"
+          :key="item.label"
+          class="overview-card"
+          type="button"
+          :aria-label="`查看${item.label}详情`"
+          @click="openPanel(item.id)"
+        >
           <strong>{{ item.value }}</strong>
           <span>{{ item.label }}</span>
-        </div>
+        </button>
       </div>
+      <button type="button" class="quick-card" @click="openPanel('chat')">
+        <span class="quick-card-label">当前 AI</span>
+        <strong>{{ provider }}</strong>
+        <span>{{ extension.adapter.provider ? '查看输入与问答详情' : '打开 AI 网页后可连接' }}</span>
+      </button>
+      <button type="button" class="settings-link" @click="openPanel('settings')">设置与备份</button>
     </section>
-    <el-alert
-      :title="provider"
-      :description="adapterDescription"
-      :type="extension.refreshError ? 'error' : extension.adapter.provider ? 'success' : 'info'"
-      :closable="false"
-      show-icon
-    />
-    <p class="detected-host">当前识别页：{{ detectedHost }}</p>
-    <el-button class="refresh" plain @click="extension.refreshAdapter">重新识别</el-button>
+    <header v-else class="detail-header">
+      <el-button text class="back-button" @click="activePanel = 'overview'">← 概览</el-button>
+      <h1>{{ panelTitles[activePanel] }}</h1>
+    </header>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'chat'" class="capability-card detail-card">
+      <el-alert
+        :title="provider"
+        :description="adapterDescription"
+        :type="extension.refreshError ? 'error' : extension.adapter.provider ? 'success' : 'info'"
+        :closable="false"
+        show-icon
+      />
+      <p class="detected-host">当前识别页：{{ detectedHost }}</p>
+      <el-button class="refresh" plain @click="extension.refreshAdapter">重新识别</el-button>
       <h2>填入当前 AI</h2>
       <el-input
         v-model="extension.prompt"
@@ -126,6 +163,13 @@ onUnmounted(() => {
         placeholder="输入要填入当前网页输入框的内容"
         :disabled="!extension.adapter.provider"
       />
+      <div class="filter-row">
+        <el-select v-model="extension.skillOverrideId" class="filter-select" clearable placeholder="下一次发送：自动匹配">
+          <el-option v-for="skill in extension.skills" :key="`override-${skill.id}`" :label="`强制使用：${skill.manifest.name}`" :value="skill.id" />
+        </el-select>
+        <el-button :disabled="!extension.skillOverrideId || extension.skillOverrideId === '__disabled__'" @click="extension.setSkillRequestOverride(extension.skillOverrideId)">本次强制使用</el-button>
+        <el-button @click="extension.setSkillRequestOverride(undefined, true)">本次禁用</el-button>
+      </div>
       <el-button
         class="primary-action"
         type="primary"
@@ -144,7 +188,7 @@ onUnmounted(() => {
       />
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'chat'" class="capability-card">
       <h2>当前问答</h2>
       <el-alert
         v-if="extension.conversationError"
@@ -165,7 +209,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'conversations'" class="capability-card detail-card">
       <div class="section-heading">
         <h2>本地会话</h2>
         <div class="heading-actions">
@@ -227,28 +271,36 @@ onUnmounted(() => {
       <p v-else class="empty-text">当前会话尚未保存消息</p>
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'memory'" class="capability-card detail-card">
       <div class="section-heading">
         <h2>长期记忆</h2>
         <div class="heading-actions">
-          <el-button text :loading="extension.memoryLoading" @click="extension.refreshMemories(); extension.refreshMemoryDiagnostic()">刷新</el-button>
+          <el-button text :loading="extension.memoryLoading" @click="extension.refreshMemories(); extension.refreshMemoryCandidates(); extension.refreshSessionChunks(); extension.refreshMemoryDiagnostic()">刷新</el-button>
+          <el-button text :loading="extension.memoryLoading" @click="extension.deduplicateMemories">检查与整理</el-button>
           <el-button text type="danger" :loading="extension.memoryLoading" @click="extension.clearMemories">清空</el-button>
         </div>
       </div>
       <p v-if="extension.memoryDiagnostic" class="detected-host">
         注入诊断：{{ extension.memoryDiagnostic.detail }}
-        <template v-if="extension.memoryDiagnostic.stage === 'memory-retrieved'">（{{ extension.memoryDiagnostic.count }} 条）</template>
+        <template v-if="extension.memoryDiagnostic.stage === 'memory-injected'">（{{ extension.memoryDiagnostic.count }} 条）</template>
       </p>
+      <ul v-if="extension.memoryDiagnostic?.items?.length" class="memory-list memory-diagnostic-list">
+        <li v-for="item in extension.memoryDiagnostic.items" :key="item.id">
+          <span class="message-role">{{ item.scope }} · 匹配分 {{ item.score.toFixed(1) }}</span>
+          <p>{{ item.summary }}</p>
+          <p class="skill-triggers">原因：{{ item.reason }}</p>
+        </li>
+      </ul>
       <div class="filter-row">
         <el-input
           v-model="extension.memoryQuery"
           class="filter-select"
           clearable
           placeholder="搜索记忆"
-          @keyup.enter="extension.refreshMemories"
-          @clear="extension.refreshMemories"
+          @keyup.enter="extension.refreshMemories(); extension.refreshSessionChunks()"
+          @clear="extension.refreshMemories(); extension.refreshSessionChunks()"
         />
-        <el-button :loading="extension.memoryLoading" @click="extension.refreshMemories">搜索</el-button>
+        <el-button :loading="extension.memoryLoading" @click="extension.refreshMemories(); extension.refreshSessionChunks()">搜索</el-button>
       </div>
       <div class="filter-row">
         <el-select
@@ -266,7 +318,7 @@ onUnmounted(() => {
           <el-option label="procedure" value="procedure" />
         </el-select>
         <label class="filter-check">
-          <el-switch v-model="extension.memoryProjectOnly" size="small" @change="extension.refreshMemories" />
+          <el-switch v-model="extension.memoryProjectOnly" size="small" @change="extension.refreshMemories(); extension.refreshSessionChunks()" />
           <span>含活动项目</span>
         </label>
       </div>
@@ -277,25 +329,96 @@ onUnmounted(() => {
         :rows="3"
         placeholder="例如：我偏好简洁的中文回复"
       />
+      <div class="filter-row">
+        <el-select v-model="extension.memoryTypeDraft" class="filter-select" placeholder="记忆类型">
+          <el-option label="偏好" value="preference" />
+          <el-option label="个人资料" value="profile" />
+          <el-option label="知识" value="knowledge" />
+          <el-option label="项目" value="project" />
+        </el-select>
+        <el-select v-model="extension.memoryScopeDraft" class="filter-select" placeholder="作用域">
+          <el-option label="全局" value="global" />
+          <el-option :disabled="!extension.adapter.provider" label="当前平台" value="provider" />
+          <el-option :disabled="!extension.activeProjectId" label="当前项目" value="project" />
+        </el-select>
+      </div>
       <el-button class="primary-action" type="primary" :disabled="!extension.memoryDraft.trim()" @click="extension.saveMemory">
         保存记忆
       </el-button>
       <el-alert v-if="extension.memoryError" class="action-error" :title="extension.memoryError" type="error" :closable="false" />
+      <el-alert v-if="extension.memoryMessage" class="action-error" :title="extension.memoryMessage" type="success" :closable="false" />
+      <div v-if="extension.memoryCandidates.length" class="memory-candidate-section">
+        <div class="section-heading compact-heading">
+          <h3>待确认 · {{ extension.memoryCandidates.length }}</h3>
+          <span class="empty-text">候选不会注入 AI</span>
+        </div>
+        <article v-for="candidate in extension.memoryCandidates" :key="candidate.id" class="memory-candidate-card">
+          <div class="skill-item-header">
+            <span class="message-role">{{ candidate.status === 'conflict' ? '冲突' : '候选' }} · {{ candidate.type }} · {{ candidate.scope }}</span>
+            <span class="skill-triggers">{{ candidate.reason || '等待确认' }}</span>
+          </div>
+          <el-input
+            :model-value="extension.memoryCandidateEdit || candidate.proposedValue"
+            class="memory-input"
+            type="textarea"
+            :rows="2"
+            @focus="extension.memoryCandidateEdit = candidate.proposedValue"
+            @update:model-value="(value: string) => extension.memoryCandidateEdit = value"
+          />
+          <div class="agent-actions">
+            <el-button size="small" type="primary" :loading="extension.memoryLoading" @click="extension.acceptMemoryCandidate(candidate)">确认保存</el-button>
+            <el-button size="small" :loading="extension.memoryLoading" @click="extension.rejectMemoryCandidate(candidate.id)">忽略</el-button>
+          </div>
+        </article>
+      </div>
+      <div v-if="extension.sessionChunks.length" class="session-archive-section">
+        <div class="section-heading compact-heading">
+          <h3>会话归档</h3>
+          <span class="empty-text">仅本地保存</span>
+        </div>
+        <article v-for="chunk in extension.sessionChunks" :key="chunk.id" class="session-chunk-card">
+          <span class="message-role">{{ chunk.providerId }} · {{ new Date(chunk.endedAt).toLocaleString() }}</span>
+          <p>{{ chunk.summary }}</p>
+        </article>
+      </div>
       <ul v-if="extension.memories.length" class="memory-list">
-        <li v-for="memory in extension.memories" :key="memory.id">
+        <li v-for="memory in extension.memories" :key="memory.id" class="memory-card" @click="extension.selectMemory(memory.id)">
           <div class="skill-item-header">
             <span class="message-role">{{ memory.type }} · {{ memory.scope }}</span>
-            <el-button text type="danger" size="small" @click="extension.deleteMemory(memory.id)">删除</el-button>
+            <div class="heading-actions">
+              <el-button text size="small" @click.stop="extension.toggleMemoryPinned(memory)">{{ memory.pinned ? '取消置顶' : '置顶' }}</el-button>
+              <el-button text size="small" @click.stop="extension.beginMemoryEdit(memory)">编辑</el-button>
+              <el-button text type="danger" size="small" @click.stop="extension.deleteMemory(memory.id)">删除</el-button>
+            </div>
           </div>
-          <p>{{ memory.summary }}</p>
+          <template v-if="extension.memoryEditId === memory.id">
+            <el-input v-model="extension.memoryEditContent" class="memory-input" type="textarea" :rows="3" />
+            <div class="agent-actions">
+              <el-button size="small" @click="extension.cancelMemoryEdit">取消</el-button>
+              <el-button size="small" type="primary" @click="extension.saveMemoryEdit(memory)">保存</el-button>
+            </div>
+          </template>
+          <template v-else>
+            <p>{{ memory.summary }}</p>
+            <div v-if="extension.selectedMemoryId === memory.id" class="memory-detail">
+              <p><strong>完整内容</strong></p>
+              <p>{{ memory.content }}</p>
+              <p class="skill-triggers">置信度 {{ Math.round(memory.confidence * 100) }}% · 重要度 {{ Math.round(memory.importance * 100) }}%</p>
+              <template v-if="extension.selectedMemoryDetail?.fact.id === memory.id">
+                <p class="skill-triggers">来源证据 {{ extension.selectedMemoryDetail.fact.sourceCount }} 条 · 修订 {{ extension.selectedMemoryDetail.revisions.length }} 次</p>
+                <p v-if="extension.selectedMemoryDetail.evidence[0]" class="skill-triggers">最近依据：{{ extension.selectedMemoryDetail.evidence[0].excerpt }}</p>
+                <p v-if="extension.selectedMemoryDetail.revisions[0]" class="skill-triggers">上次修订：{{ extension.selectedMemoryDetail.revisions[0].previousValue }} → {{ extension.selectedMemoryDetail.revisions[0].nextValue }}</p>
+              </template>
+            </div>
+          </template>
         </li>
       </ul>
       <p v-else class="empty-text">暂无长期记忆</p>
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'skills'" class="capability-card detail-card">
       <div class="section-heading">
-        <h2>Skill 技能</h2>
+        <h2>已安装 Skill</h2>
         <el-button text :loading="extension.skillLoading" @click="extension.refreshSkills">刷新</el-button>
       </div>
       <el-input v-model="extension.skillDraftName" class="skill-input" placeholder="Skill 名称，例如 research-agent" />
@@ -334,10 +457,10 @@ onUnmounted(() => {
         <el-button :loading="extension.skillLoading" @click="extension.matchSkills">匹配</el-button>
       </div>
       <ul v-if="extension.matchedSkills.length" class="skill-list">
-        <li v-for="skill in extension.matchedSkills" :key="`match-${skill.id}`">
-          <span class="message-role">matched</span>
-          <strong>{{ skill.manifest.name }}</strong>
-          <p>{{ skill.manifest.description || skill.prompt }}</p>
+        <li v-for="match in extension.matchedSkills" :key="`match-${match.skill.id}`">
+          <span class="message-role">matched · {{ match.score.toFixed(1) }}</span>
+          <strong>{{ match.skill.manifest.name }}</strong>
+          <p>{{ match.skill.manifest.description || match.skill.prompt }}</p>
         </li>
       </ul>
       <ul v-if="extension.skills.length" class="skill-list">
@@ -368,10 +491,31 @@ onUnmounted(() => {
           <p v-if="skill.manifest.triggers?.length" class="skill-triggers">触发：{{ skill.manifest.triggers.join(' / ') }}</p>
         </li>
       </ul>
-      <p v-else class="empty-text">暂无 Skill</p>
+      <p v-else class="empty-text">暂无已安装 Skill</p>
+      <div class="section-heading skill-template-heading">
+        <h2>Skill 模板</h2>
+      </div>
+      <ul v-if="extension.skillTemplates.length" class="skill-list">
+        <li v-for="template in extension.skillTemplates" :key="template.id">
+          <div class="skill-item-header">
+            <div>
+              <strong>{{ template.name }}</strong>
+              <p>{{ template.description }}</p>
+            </div>
+            <el-button
+              size="small"
+              type="primary"
+              :loading="extension.skillLoading"
+              @click="extension.installSkillTemplate(template.id || template.name)"
+            >
+              安装
+            </el-button>
+          </div>
+        </li>
+      </ul>
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'tools'" class="capability-card detail-card">
       <div class="section-heading">
         <h2>Tool Runtime</h2>
         <div class="heading-actions">
@@ -427,7 +571,7 @@ onUnmounted(() => {
       <p v-else class="empty-text">尚未执行工具</p>
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'settings'" class="capability-card detail-card">
       <div class="section-heading">
         <h2>备份 / 恢复</h2>
         <el-button text :loading="extension.backupLoading" @click="extension.exportData">导出</el-button>
@@ -446,11 +590,20 @@ onUnmounted(() => {
           导入数据
         </el-button>
       </div>
+      <div class="filter-row">
+        <el-select v-model="extension.agentProviderDraft" class="filter-select" placeholder="切换 Agent Provider">
+          <el-option label="DeepSeek" value="deepseek" />
+          <el-option label="Kimi" value="kimi" />
+        </el-select>
+        <el-button :disabled="!extension.selectedAgentTaskId || !extension.agentProviderDraft" :loading="extension.agentLoading" @click="extension.switchSelectedAgentProvider">
+          切换并续跑
+        </el-button>
+      </div>
       <el-alert v-if="extension.backupError" class="action-error" :title="extension.backupError" type="error" :closable="false" />
       <el-alert v-if="extension.backupMessage" class="action-error" :title="extension.backupMessage" type="success" :closable="false" />
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'settings'" class="capability-card">
       <div class="section-heading">
         <h2>注入设置</h2>
         <el-button text :loading="extension.settingsLoading" @click="extension.refreshSettings">刷新</el-button>
@@ -461,6 +614,25 @@ onUnmounted(() => {
           <el-switch
             :model-value="extension.settings.injectMemory"
             @change="(value: string | number | boolean) => extension.updateSettings({ injectMemory: Boolean(value) })"
+          />
+        </label>
+        <label class="setting-item">
+          <span>自动记忆</span>
+          <el-select
+            :model-value="extension.settings.memorySaveMode"
+            style="width: 120px"
+            @change="(value: 'auto' | 'confirm' | 'off') => extension.updateSettings({ memorySaveMode: value })"
+          >
+            <el-option label="自动保存（安全项）" value="auto" />
+            <el-option label="先确认再保存" value="confirm" />
+            <el-option label="关闭自动捕捉" value="off" />
+          </el-select>
+        </label>
+        <label class="setting-item">
+          <span>启用 Browser Control</span>
+          <el-switch
+            :model-value="extension.settings.browserControlEnabled"
+            @change="(value: string | number | boolean) => extension.updateSettings({ browserControlEnabled: Boolean(value) })"
           />
         </label>
         <label class="setting-item">
@@ -488,7 +660,7 @@ onUnmounted(() => {
       <el-alert v-if="extension.settingsError" class="action-error" :title="extension.settingsError" type="error" :closable="false" />
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'projects'" class="capability-card detail-card">
       <div class="section-heading">
         <h2>项目上下文</h2>
         <el-button text :loading="extension.projectLoading" @click="extension.refreshProjects">刷新</el-button>
@@ -541,7 +713,7 @@ onUnmounted(() => {
       <p v-else class="empty-text">暂无项目</p>
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'tools'" class="capability-card">
       <div class="section-heading">
         <h2>MCP</h2>
         <el-button text :loading="extension.mcpLoading" @click="extension.refreshMcpServers">刷新</el-button>
@@ -557,7 +729,7 @@ onUnmounted(() => {
       <p v-else class="empty-text">暂无 MCP Server</p>
     </section>
 
-    <section class="capability-card">
+    <section v-if="activePanel === 'tasks'" class="capability-card detail-card">
       <div class="section-heading">
         <h2>Agent Runtime</h2>
         <div class="heading-actions">

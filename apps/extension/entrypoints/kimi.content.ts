@@ -17,6 +17,7 @@ export default defineContentScript({
   main(ctx) {
     const disposeBridge = installMainWorldBridge('kimi');
     const adapter = adapters.find(window.location.href);
+    const pageSessionId = globalThis.crypto?.randomUUID?.() ?? `page-${Date.now().toString(36)}`;
     const status = (): AdapterStatus => ({
       provider: providerFromAdapter(adapter),
       url: window.location.href,
@@ -56,22 +57,24 @@ export default defineContentScript({
 
     browser.runtime.onMessage.addListener(handleMessage);
 
-    const stopObserving = adapter?.observeMessages(({ id, role, text }) => {
+    const sendUpdate = (payload: ExtensionMessageMap['omni:response-update']) => {
       void browser.runtime.sendMessage<ExtensionMessage<'omni:response-update'>>({
         type: 'omni:response-update',
-        payload: {
-          provider: providerFromAdapter(adapter) ?? 'kimi',
-          role,
-          text,
-          messageId: id,
-          conversationId: adapter.getConversationId(),
-        },
+        payload,
       });
+    };
+    const stopMessages = adapter?.observeMessages(({ id, role, text }) => {
+      if (role !== 'user') return;
+      sendUpdate({ provider: providerFromAdapter(adapter) ?? 'kimi', role, text, messageId: id, conversationId: adapter.getConversationId(), pageSessionId, state: 'settled' });
+    });
+    const stopResponses = adapter?.observeResponse(({ id, text, conversationId }) => {
+      sendUpdate({ provider: providerFromAdapter(adapter) ?? 'kimi', role: 'assistant', text, messageId: id, conversationId, pageSessionId, state: 'settled' });
     });
 
     ctx.onInvalidated(() => {
       browser.runtime.onMessage.removeListener(handleMessage);
-      stopObserving?.();
+      stopMessages?.();
+      stopResponses?.();
       disposeBridge();
     });
 

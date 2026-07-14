@@ -76,14 +76,6 @@ export function installMainWorldBridge(defaultProvider: SupportedProvider): () =
         memoryCount: result?.memoryCount ?? 0,
         skillCount: result?.skillCount ?? 0,
       });
-      await browser.runtime.sendMessage({
-        type: 'omni:memory-diagnostic',
-        payload: {
-          stage: 'memory-retrieved',
-          detail: `${provider} 扩展已完成记忆/技能检索`,
-          count: (result?.memoryCount ?? 0) + (result?.skillCount ?? 0),
-        },
-      } as unknown as ExtensionMessage);
     } catch (error) {
       console.warn('[OmniAgent] memory augmentation unavailable', error);
       mainWorldPort?.postMessage({
