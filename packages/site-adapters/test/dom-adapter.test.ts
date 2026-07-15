@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DomSiteAdapter } from '../src/dom-adapter.js';
+import { kimiAdapter } from '../src/kimi.js';
 
 class FakeStyle {
   private readonly values = new Map<string, string>();
@@ -31,6 +32,8 @@ class FakeElement {
     if (selector === '.assistant') return this.children;
     return [];
   }
+  focus(): void {}
+  dispatchEvent(): boolean { return true; }
 }
 
 test('turns a hidden tool action into a visible result in the same response', () => {
@@ -114,6 +117,54 @@ test('reports actionable DOM adapter health checks', () => {
     assert.equal(health.submitEnabled, true);
     assert.equal(health.messageCount, 0);
     assert.equal(health.responseCount, 1);
+  } finally {
+    (globalThis as { document: unknown }).document = originalDocument;
+  }
+});
+
+test('recognizes the current Kimi div-based send control', () => {
+  const input = new FakeElement();
+  const submit = new FakeElement();
+  const originalDocument = globalThis.document;
+  (globalThis as { document: unknown }).document = {
+    querySelector: (selector: string) => {
+      if (selector === '[contenteditable="true"][role="textbox"]') return input;
+      if (selector === '.send-button-container') return submit;
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+
+  try {
+    const health = kimiAdapter.inspectHealth();
+    assert.equal(health.inputFound, true);
+    assert.equal(health.submitFound, true);
+    assert.equal(health.submitEnabled, true);
+  } finally {
+    (globalThis as { document: unknown }).document = originalDocument;
+  }
+});
+
+test('refuses to overwrite a non-empty provider draft', async () => {
+  const input = new FakeElement();
+  input.textContent = '用户尚未发送的草稿';
+  const submit = new FakeElement();
+  const originalDocument = globalThis.document;
+  (globalThis as { document: unknown }).document = {
+    querySelector: (selector: string) => selector === '.input' ? input : selector === '.submit' ? submit : null,
+    querySelectorAll: () => [],
+  };
+
+  try {
+    const adapter = new DomSiteAdapter({
+      id: 'test', hosts: ['example.com'], inputSelectors: ['.input'], submitSelectors: ['.submit'],
+      messageSelectors: [], responseSelectors: [],
+    });
+    await assert.rejects(
+      () => adapter.sendMessage('新的 OmniAgent 消息'),
+      /message input is not empty/,
+    );
+    assert.equal(input.textContent, '用户尚未发送的草稿');
   } finally {
     (globalThis as { document: unknown }).document = originalDocument;
   }

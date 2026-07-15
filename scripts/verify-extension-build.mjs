@@ -25,7 +25,14 @@ assert(manifest.side_panel?.default_path === 'sidepanel.html', 'Side panel entry
 
 const contentScripts = manifest.content_scripts ?? [];
 assert(contentScripts.some((entry) => entry.matches?.includes('*://chat.deepseek.com/*')), 'DeepSeek content script is missing');
-assert(contentScripts.some((entry) => entry.matches?.includes('*://kimi.com/*')), 'Kimi content script is missing');
+for (const match of [
+  '*://kimi.com/*',
+  '*://www.kimi.com/*',
+  '*://kimi.moonshot.cn/*',
+  '*://www.kimi.moonshot.cn/*',
+]) {
+  assert(contentScripts.some((entry) => entry.matches?.includes(match)), `Kimi content script is missing: ${match}`);
+}
 
 const background = readFileSync(join(output, 'background.js'), 'utf8');
 for (const marker of ['explicit-memory-saved-locally', 'memory.save_batch', 'omni:render-tool-status']) {

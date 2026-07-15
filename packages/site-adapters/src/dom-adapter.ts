@@ -49,16 +49,24 @@ export class DomSiteAdapter implements SiteAdapter {
     const input = this.findElement<HTMLElement>(this.options.inputSelectors);
     if (!input) throw new Error(`${this.id}: message input was not found`);
 
-    input.focus();
-    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(input, message);
-    } else {
-      input.textContent = message;
+    const current = readInputText(input);
+    if (sameComposerText(current, message)) {
+      input.focus();
+      return;
     }
+    if (current.trim()) {
+      throw new Error(`${this.id}: message input is not empty; clear the existing draft before inserting a new prompt`);
+    }
+
+    input.focus();
+    writeInputText(input, message);
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: message }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
     input.focus();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    if (!sameComposerText(readInputText(input), message)) {
+      throw new Error(`${this.id}: message input rejected the inserted prompt`);
+    }
   }
 
   hideInternalProtocolMessages(): void {
@@ -247,17 +255,40 @@ export class DomSiteAdapter implements SiteAdapter {
   }
 
   private clearInternalPrompt(input: HTMLElement, message: string): void {
-    const current = input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement ? input.value : input.textContent ?? '';
+    const current = readInputText(input);
     if (current !== message || !/<omniagent-(?:action|tool-result)\b/iu.test(message)) return;
-    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(input, '');
-    } else {
-      input.textContent = '';
-    }
+    writeInputText(input, '');
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
+}
+
+function isTextControl(element: HTMLElement): element is HTMLTextAreaElement | HTMLInputElement {
+  return (typeof HTMLTextAreaElement !== 'undefined' && element instanceof HTMLTextAreaElement)
+    || (typeof HTMLInputElement !== 'undefined' && element instanceof HTMLInputElement);
+}
+
+function readInputText(input: HTMLElement): string {
+  return isTextControl(input) ? input.value : input.textContent ?? '';
+}
+
+function writeInputText(input: HTMLElement, value: string): void {
+  if (!isTextControl(input)) {
+    input.textContent = value;
+    return;
+  }
+
+  const prototype = typeof HTMLTextAreaElement !== 'undefined' && input instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype
+    : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+  if (setter) setter.call(input, value);
+  else input.value = value;
+}
+
+function sameComposerText(actual: string, expected: string): boolean {
+  const normalize = (value: string) => value.replace(/\u00a0/gu, ' ').replace(/\r\n?/gu, '\n').trim();
+  return normalize(actual) === normalize(expected);
 }
 
 function isDisabled(element: HTMLElement): boolean {

@@ -23,6 +23,8 @@ export const kimiAdapter = new DomSiteAdapter({
     '[contenteditable="true"]',
   ],
   submitSelectors: [
+    '.send-button-container',
+    'div[class*="send-button-container"]',
     'button.send-button',
     'button[class*="send"]',
     'div.chat-input button[type="submit"]',
