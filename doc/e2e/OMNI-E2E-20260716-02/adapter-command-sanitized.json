@@ -1,0 +1,42 @@
+{
+  "runId": "OMNI-E2E-20260716-02",
+  "commit": "71b67c4",
+  "manifestSha256": "6CC890DC5D2F79B7998A4B21D0754F8B4EE4BD1D07E9A596911FA63FCE5B8750",
+  "kimi": {
+    "statusEnvelope": {
+      "ok": true,
+      "provider": "kimi",
+      "contentScript": true,
+      "inputFound": true,
+      "submitFound": true,
+      "submitEnabled": true
+    },
+    "conversationEnvelope": {
+      "ok": true,
+      "question": "",
+      "response": ""
+    },
+    "differentMessageEnvelope": {
+      "ok": false,
+      "error": "Kimi 输入框中已有未发送内容，请先发送或清空现有草稿后重试"
+    },
+    "composerAfterFailure": {
+      "dom": "OMNI-E2E-ERROR-VISIBLE-20260716",
+      "lexical": "OMNI-E2E-ERROR-VISIBLE-20260716",
+      "loginModal": false
+    }
+  },
+  "deepseek": {
+    "url": "https://chat.deepseek.com/sign_in",
+    "statusEnvelopeOk": true,
+    "contentScript": true,
+    "inputFound": false,
+    "submitFound": false,
+    "sidePanelAlert": "DeepSeek 未找到聊天输入框，请确认页面已登录并刷新后重试"
+  },
+  "routing": {
+    "pageCommandTarget": "page",
+    "providerContentScriptCountPerSupportedPage": 1,
+    "browserAgentExcludesSupportedProviders": true
+  }
+}
