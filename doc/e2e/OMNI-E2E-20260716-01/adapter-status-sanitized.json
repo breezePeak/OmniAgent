@@ -1,0 +1,43 @@
+{
+  "runId": "OMNI-E2E-20260716-01",
+  "commit": "dd1e782",
+  "kimi": {
+    "url": "https://www.kimi.com/",
+    "contentScript": true,
+    "inputFound": true,
+    "submitFound": true,
+    "submitEnabled": true,
+    "messageCount": 0,
+    "responseCount": 0
+  },
+  "kimiComposer": {
+    "before": {
+      "dom": "",
+      "lexical": "",
+      "loginModal": false
+    },
+    "afterEmptyInsert": {
+      "dom": "OMNI-E2E-EMPTY-DRAFT-20260716",
+      "lexical": "OMNI-E2E-EMPTY-DRAFT-20260716",
+      "loginModal": false
+    },
+    "afterDifferentMessageAttempt": {
+      "dom": "OMNI-E2E-EMPTY-DRAFT-20260716",
+      "lexical": "OMNI-E2E-EMPTY-DRAFT-20260716",
+      "loginModal": false
+    },
+    "afterMatchingMessageAttempt": {
+      "loginModal": true
+    }
+  },
+  "deepseek": {
+    "url": "https://chat.deepseek.com/sign_in",
+    "contentScript": true,
+    "inputFound": false,
+    "submitFound": false,
+    "submitEnabled": false,
+    "messageCount": 0,
+    "responseCount": 0,
+    "blockedBy": "authentication"
+  }
+}
