@@ -7,6 +7,17 @@ import { useExtensionStore } from '../../src/stores/extension';
 const extension = useExtensionStore();
 const status = computed(() => (extension.ready ? '基础工程已就绪' : '正在初始化'));
 const provider = computed(() => extension.adapter.provider?.toUpperCase() ?? '未识别的平台');
+const adapterNotice = computed(() => {
+  const explicitError = extension.insertError || extension.refreshError || extension.conversationError;
+  if (explicitError) return explicitError;
+  const health = extension.adapter.health;
+  if (!extension.adapter.provider || !health) return '';
+  const name = extension.adapter.provider === 'kimi' ? 'Kimi' : 'DeepSeek';
+  if (!health.inputFound) return `${name} 未找到聊天输入框，请确认页面已登录并刷新后重试`;
+  if (!health.submitFound) return `${name} 未找到发送按钮，请刷新页面后重试`;
+  if (!health.submitEnabled) return `${name} 发送按钮当前不可用，请检查页面状态后重试`;
+  return '';
+});
 const supportedProviders = [
   { id: 'deepseek', name: 'DeepSeek', host: 'chat.deepseek.com' },
   { id: 'kimi', name: 'Kimi', host: 'kimi.com' },
@@ -180,8 +191,15 @@ onUnmounted(() => {
       <section class="active-ai-card" :class="{ connected: extension.adapter.provider }" aria-label="当前激活 AI">
         <span class="quick-card-label">当前激活 AI</span>
         <strong>{{ provider }}</strong>
-        <span>{{ extension.adapter.provider ? '已随当前浏览器页签自动切换' : '切换到已支持的网站后自动激活' }}</span>
+        <span class="active-ai-note">{{ extension.adapter.provider ? '已随当前浏览器页签自动切换' : '切换到已支持的网站后自动激活' }}</span>
+        <div v-if="extension.adapter.health" class="adapter-health" aria-label="页面适配状态">
+          <span class="adapter-health-item" :data-state="extension.adapter.health.inputFound ? 'ready' : 'error'">输入框</span>
+          <span class="adapter-health-item" :data-state="extension.adapter.health.submitFound ? 'ready' : 'error'">发送按钮</span>
+          <span class="adapter-health-item" :data-state="extension.adapter.health.messageCount ? 'ready' : 'idle'">消息 {{ extension.adapter.health.messageCount }}</span>
+          <span class="adapter-health-item" :data-state="extension.adapter.health.responseCount ? 'ready' : 'idle'">回复 {{ extension.adapter.health.responseCount }}</span>
+        </div>
       </section>
+      <el-alert v-if="adapterNotice" class="action-error" :title="adapterNotice" type="error" :closable="false" show-icon />
       <section class="provider-section" aria-label="已支持的平台">
         <span class="quick-card-label">已支持的平台</span>
         <div class="provider-grid">

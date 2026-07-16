@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "tsx --test test/memory.test.ts test/file-memory.test.ts",
+    "test": "tsx --test test/memory.test.ts test/file-memory.test.ts test/cross-provider.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

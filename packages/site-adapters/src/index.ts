@@ -2,7 +2,7 @@
  * Keeps provider-specific DOM behavior outside Agent Core.
  * Concrete adapters are deliberately deferred until after phase one.
  */
-import type { SupportedProvider } from '@omni-agent/shared';
+import type { AdapterHealthStatus, SupportedProvider } from '@omni-agent/shared';
 import type { ConversationTurn } from '@omni-agent/shared';
 
 export interface ObservedMessage {
@@ -54,7 +54,9 @@ export interface SiteAdapter {
   match(url: string): boolean;
   insertPrompt(message: string): Promise<void>;
   sendMessage(message: string): Promise<void>;
+  inspectHealth(): AdapterHealthStatus;
   hideInternalProtocolMessages(): void;
+  renderToolStatus(messageId: string, text: string): boolean;
   getLatestTurn(): ConversationTurn;
   observeMessages(callback: (message: ObservedMessage) => void): () => void;
   observeResponse(callback: (response: ModelResponse) => void): () => void;

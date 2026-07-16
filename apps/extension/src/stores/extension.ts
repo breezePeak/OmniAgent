@@ -4,6 +4,7 @@ import type { ConversationRecord, MemoryArtifactRecord, MemoryEvidenceRecord, Me
 import type { SkillDefinition, SkillInput } from '@omni-agent/skills';
 import type { ToolDescriptor, ToolResult } from '@omni-agent/tools';
 import type { AgentTask } from '@omni-agent/agent-core';
+import { unwrapAdapterCommandResult, type AdapterCommandResult } from '../adapter-command';
 
 interface McpServerSummary {
   id: string;
@@ -161,6 +162,7 @@ export const useExtensionStore = defineStore('extension', {
         const payload = message.payload as ExtensionMessageMap['omni:response-update'] | undefined;
         if (payload?.role === 'user') this.latestQuestion = payload.text;
         if (payload?.role === 'assistant') this.latestResponse = payload.text;
+        void this.refreshAdapter();
         void this.refreshMemoryDiagnostic();
         void this.refreshSavedConversations();
         return undefined;
@@ -195,10 +197,10 @@ export const useExtensionStore = defineStore('extension', {
     },
     async refreshAdapter() {
       try {
-        const response = await browser.runtime.sendMessage<ExtensionMessage<'omni:adapter-status'>, AdapterStatus | undefined>({
+        const result = await browser.runtime.sendMessage<ExtensionMessage<'omni:adapter-status'>, AdapterCommandResult<AdapterStatus> | undefined>({
           type: 'omni:adapter-status',
         });
-        if (!response) throw new Error('Background 未返回识别结果');
+        const response = unwrapAdapterCommandResult<AdapterStatus>(result);
         this.adapter = response;
         this.refreshError = '';
         this.conversationError = '';
@@ -215,9 +217,10 @@ export const useExtensionStore = defineStore('extension', {
       }
     },
     async refreshConversation() {
-      const turn = await browser.runtime.sendMessage<ExtensionMessage<'omni:conversation-snapshot'>, ConversationTurn | null | undefined>({
+      const result = await browser.runtime.sendMessage<ExtensionMessage<'omni:conversation-snapshot'>, AdapterCommandResult<ConversationTurn | null> | undefined>({
         type: 'omni:conversation-snapshot',
       });
+      const turn = unwrapAdapterCommandResult<ConversationTurn | null>(result);
       if (!turn) throw new Error('Content Script 未返回问答数据，请刷新 DeepSeek/Kimi 页面');
       this.latestQuestion = turn.question;
       this.latestResponse = turn.response;
@@ -229,10 +232,11 @@ export const useExtensionStore = defineStore('extension', {
       this.inserting = true;
       this.insertError = '';
       try {
-        await browser.runtime.sendMessage<ExtensionMessage<'omni:insert-prompt'>, AdapterStatus>({
+        const result = await browser.runtime.sendMessage<ExtensionMessage<'omni:insert-prompt'>, AdapterCommandResult<AdapterStatus> | undefined>({
           type: 'omni:insert-prompt',
           payload: { message },
         });
+        unwrapAdapterCommandResult<AdapterStatus>(result);
       } catch (error) {
         this.insertError = error instanceof Error ? error.message : '写入输入框失败';
       } finally {

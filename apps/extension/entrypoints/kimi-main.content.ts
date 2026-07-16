@@ -21,7 +21,9 @@ export default defineContentScript({
       extractPrompt: extractKimiPrompt,
       applyPrompt: applyKimiPrompt,
       rewriteProtobufPrompt: true,
-      timeoutMs: 10_000,
+      // File parsing and durable writes complete before Kimi sends the prompt.
+      // Large PDFs/DOCX files can legitimately take longer than ten seconds.
+      timeoutMs: 120_000,
     });
   },
 });

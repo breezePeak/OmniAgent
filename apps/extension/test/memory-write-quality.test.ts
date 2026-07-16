@@ -34,6 +34,8 @@ test('rejects UI state, confirmation chatter, reasoning, and tool protocol', () 
     '我在记忆中心明明看到的是5条',
     '第一批已提交，待确认，请回复确认',
     '思考过程：我们需要调用记忆工具',
+    '记忆处理完成：已保存 1 条。',
+    '记忆保存失败：未检测到附件。',
     '<omniagent-tool-result>{"name":"memory.save_batch"}</omniagent-tool-result>',
   ];
   for (const content of rejected) assert.equal(isDurableMemoryContent(content), false, content);

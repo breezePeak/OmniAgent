@@ -29,7 +29,10 @@ import {
 import { McpProvider } from '@omni-agent/mcp';
 import { AgentRuntime, type AgentTask } from '@omni-agent/agent-core';
 import { buildContinuationPrompt, isInternalProtocolMessage, parseAgentDecision, serializeToolResult } from '@omni-agent/agent-protocol';
+import { captureAdapterCommand, isAdapterPageCommand, unwrapAdapterCommandResult } from '../src/adapter-command';
 import { isDurableMemoryContent, normalizeEvidenceText, validateChatMemoryEvidence, type ChatMemorySource } from '../src/memory-write-quality';
+import { formatMemorySaveStatus, formatToolContinuationFailure } from '../src/tool-status';
+import { extractExplicitMemoryContent, inferExplicitMemoryType } from '../src/explicit-memory';
 import {
   isBulkMemoryCommand,
   isContextualMemoryCommand,
@@ -50,6 +53,8 @@ const SUPPORTED_MEMORY_FILE_EXTENSIONS = new Set(['docx', 'pdf', 'txt']);
 const FILE_MEMORY_INTENT_TTL_MS = 30 * 60 * 1000;
 const pendingFileMemoryIntentKeyPrefix = 'pending-file-memory-intent';
 const handledModelActions = new Set<string>();
+const recentExplicitMemoryCaptures = new Map<string, { at: number; result: ExplicitMemoryCaptureResult }>();
+const pendingExplicitMemoryResults = new Map<string, PendingExplicitMemoryResult>();
 
 interface ToolHistoryItem {
   id: string;
@@ -60,6 +65,24 @@ interface ToolHistoryItem {
   error?: string;
   durationMs: number;
   at: number;
+}
+
+interface ExplicitMemoryCaptureResult {
+  saved: number;
+  candidates: number;
+  rejected: number;
+  items: Array<{
+    status: string;
+    factId: string | null;
+    candidateId: string | null;
+    reason?: string;
+  }>;
+}
+
+interface PendingExplicitMemoryResult {
+  id: string;
+  at: number;
+  result: ExplicitMemoryCaptureResult;
 }
 
 const skills = new SkillService({
@@ -209,9 +232,19 @@ export default defineBackground(() => {
       return undefined;
     }
     if (message.type === 'omni:capture-user-memory') {
-      // Kept as a no-op for pages that still run an older content script.
-      // Chat facts now enter only through the source-verified batch pipeline.
-      return undefined;
+      const payload = message.payload as ExtensionMessage<'omni:capture-user-memory'>['payload'];
+      if (!payload?.text?.trim()) return undefined;
+      const projectId = await storage.getActiveProjectId();
+      const conversation = payload.conversationId
+        ? await storage.getOrCreateConversation({ providerId: payload.provider, externalId: payload.conversationId, projectId })
+        : null;
+      return captureExplicitUserMemory({
+        text: payload.text,
+        providerId: payload.provider,
+        projectId,
+        conversationId: conversation?.id,
+        externalConversationId: payload.conversationId,
+      });
     }
     if (message.type === 'omni:list-conversations') {
       const payload = message.payload as ExtensionMessage<'omni:list-conversations'>['payload'];
@@ -594,6 +627,20 @@ export default defineBackground(() => {
         )
         : null;
       if (fileImport?.files) await clearPendingFileMemoryIntent(payload);
+      if (fileImport?.handled) {
+        rememberPendingExplicitMemoryResult({
+          text: rawPrompt,
+          providerId: payload.provider,
+          projectId: activeProjectId,
+          externalConversationId: payload.conversationId,
+          pageSessionId: payload.pageSessionId,
+        }, {
+          saved: fileImport.saved + fileImport.duplicates,
+          candidates: 0,
+          rejected: fileImport.rejected,
+          items: [],
+        });
+      }
       if (!rawPrompt.trim() && !fileImport?.handled) {
         return { prompt: rawPrompt, memoryCount: 0, skillCount: 0, toolCount: 0, projectId: activeProjectId };
       }
@@ -650,8 +697,8 @@ export default defineBackground(() => {
         fileImport?.handled
           ? `OmniAgent 已直接解析并处理用户刚上传的文件：成功写入 ${fileImport.saved} 条，拒绝 ${fileImport.rejected} 条${fileImport.duplicates ? `，跳过 ${fileImport.duplicates} 个重复文件` : ''}${fileImport.errors.length ? `。失败原因：${fileImport.errors.join('；').slice(0, 600)}` : ''}。不要再调用任何记忆工具，不要复述文件内容，只简短告知保存结果。`
           : '',
-        !explicitMemoryCommand && settings.injectTools && conversationEvidence
-          ? `${conversationEvidence}\n\n只有在当前消息包含明确、稳定、可长期复用的信息且确有必要主动记忆时，才调用 memory.save_batch，并逐项引用上面的原文和 sourceMessageId。普通主动保存必须进入待确认，不要把推测、闲聊、页面状态或你的回复过程当作记忆。`
+        !explicitMemoryCommand && settings.injectTools && settings.memorySaveMode !== 'off' && conversationEvidence
+          ? `${conversationEvidence}\n\n只有在当前消息包含明确、稳定、可长期复用的信息且确有必要主动记忆时，才调用 memory.save_batch，并逐项引用上面的原文和 sourceMessageId。${settings.memorySaveMode === 'auto' ? '当前为自动模式：通过原文校验且不敏感的安全项会直接保存，只有冲突项需要确认。' : '当前为确认模式：合法条目会进入待确认。'}不要把推测、闲聊、页面状态或你的回复过程当作记忆。`
           : '',
         explicitMemoryCommand && settings.memorySaveMode === 'auto' && settings.injectTools && !fileImport?.handled
           ? `用户已明确要求保存当前聊天内容。停止普通回复，且只调用一次 memory.save_batch；不要解释、不要要求确认、不要说“待确认”。items 每项必须提供 content、type、importance、sourceQuotes、sourceMessageIds。sourceQuotes 必须逐字摘自下面的当前会话原文，sourceMessageIds 必须使用对应的 sourceMessageId；没有可核验原文的内容不要提交。items 仅保留可长期复用的事实、答案、清单和配置：删除思考过程、工具协议、寒暄、确认话术，以及任何关于记忆中心、候选、保存数量、已保存状态或页面 UI 的描述；题库答案、清单和配置保留原文。长内容按标题、段落、列表项、完整题目或句末等语义边界拆分为约 800 字，绝不能在题干、答案、代码块、表格行或句子中间截断。\n\n${conversationEvidence}`
@@ -699,18 +746,22 @@ export default defineBackground(() => {
 
     const tab = await getActiveTab();
     if (!tab?.id) throw new Error('无法获取当前浏览器标签页');
+    const tabId = tab.id;
 
     const adapter = adapters.find(tab.url ?? '');
     if (message.type === 'omni:adapter-status') {
-      if (!adapter) return statusFor(tab.url, adapter);
-      try {
-        const status = await browser.tabs.sendMessage(tab.id, message) as AdapterStatus | undefined;
-        if (status?.provider) return status;
-      } catch {
-        // Fall through to an actionable error instead of reporting a URL-only
-        // match as a connected page.
-      }
-      throw new Error(`${providerFromAdapter(adapter) === 'kimi' ? 'Kimi' : 'DeepSeek'} 页面适配器未就绪，请刷新当前网页后重试`);
+      return captureAdapterCommand(async () => {
+        if (!adapter) return statusFor(tab.url, adapter);
+        try {
+          const response = await browser.tabs.sendMessage(tabId, { ...message, target: 'page' });
+          const status = unwrapAdapterCommandResult<AdapterStatus>(response);
+          if (status?.provider) return status;
+        } catch {
+          // Fall through to an actionable error instead of reporting a URL-only
+          // match as a connected page.
+        }
+        throw new Error(`${providerFromAdapter(adapter) === 'kimi' ? 'Kimi' : 'DeepSeek'} 页面适配器未就绪，请刷新当前网页后重试`);
+      });
     }
     if (
       message.type === 'omni:browser-snapshot' ||
@@ -730,8 +781,10 @@ export default defineBackground(() => {
       message.type === 'omni:insert-prompt' ||
       message.type === 'omni:send-message'
     ) {
-      if (!adapter) throw new Error('请在 DeepSeek 或 Kimi 网页中使用此功能');
-      return browser.tabs.sendMessage(tab.id, message);
+      return captureAdapterCommand(async () => {
+        if (!adapter) throw new Error('请在 DeepSeek 或 Kimi 网页中使用此功能');
+        return sendToActiveTab(message);
+      });
     }
     return undefined;
   });
@@ -820,11 +873,17 @@ async function sendToActiveTab(message: ExtensionMessage): Promise<unknown> {
   const tab = await getActiveTab();
   if (!tab?.id) throw new Error('无法获取当前浏览器标签页');
   if (isRestrictedUrl(tab.url)) throw new Error('当前页面不支持浏览器操作');
+  let response: unknown;
   try {
-    return await browser.tabs.sendMessage(tab.id, message);
-  } catch {
+    response = await browser.tabs.sendMessage(tab.id, { ...message, target: 'page' });
+  } catch (error) {
+    if (isAdapterPageCommand(message)) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`页面适配器通信失败：${detail || '内容脚本没有响应'}。请刷新当前网页后重试`);
+    }
     throw new Error('当前页面尚未注入 Browser Agent，请刷新页面后重试');
   }
+  return isAdapterPageCommand(message) ? unwrapAdapterCommandResult(response) : response;
 }
 
 function isRestrictedUrl(url: string | undefined): boolean {
@@ -1130,6 +1189,14 @@ async function stageMemoryArtifact(
     });
     await notifyMemoryChanged('');
     if (await hasInheritedFileMemoryIntent(payload, conversation.id)) {
+      await setFileImportDiagnostic({
+        handled: true,
+        files: 1,
+        saved: 0,
+        rejected: 0,
+        duplicates: 1,
+        errors: [],
+      }, payload.provider);
       await clearPendingFileMemoryIntent(payload);
     }
     return { ok: true, artifactId: artifact.id, status: artifact.status, duplicate: true };
@@ -1498,11 +1565,12 @@ async function saveMemoryBatch(
         sourceKind: 'model_tool',
         sourceMessageId: evidence.sourceMessageId,
         sourceQuote: evidence.sourceQuote,
-        policy: explicitUserIntent
-          ? 'auto_safe'
-          : settings.memorySaveMode === 'off' ? 'manual_only' : 'review_all',
+        policy: toMemoryWritePolicy(settings.memorySaveMode),
         explicitUserIntent,
-        reason: explicitUserIntent ? 'User explicitly requested batch memory save' : undefined,
+        sourceVerified: true,
+        reason: explicitUserIntent
+          ? 'User explicitly requested batch memory save'
+          : settings.memorySaveMode === 'auto' ? 'Source-verified automatic memory save' : undefined,
       });
       results.push({ itemIndex, chunkIndex, status: outcome.status, factId: outcome.fact?.id ?? null, candidateId: outcome.candidate?.id ?? null, reason: outcome.reason });
     }
@@ -1546,20 +1614,226 @@ function normalizeMemoryType(value: string | undefined): 'knowledge' | 'preferen
   return value === 'preference' || value === 'profile' || value === 'project' || value === 'episode' || value === 'procedure' ? value : 'knowledge';
 }
 
+interface ExplicitMemoryCaptureInput {
+  text: string;
+  providerId: 'deepseek' | 'kimi';
+  projectId: string | null;
+  conversationId?: string | null;
+  externalConversationId?: string | null;
+  pageSessionId?: string;
+  sourceMessageId?: string | null;
+}
+
+async function captureExplicitUserMemory(input: ExplicitMemoryCaptureInput): Promise<ExplicitMemoryCaptureResult | undefined> {
+  const command = userFacingMemoryCommandText(input.text);
+  if (!isExplicitMemoryCommand(command) || isNegatedMemoryCommand(command)) return undefined;
+
+  const settings = await getRuntimeSettings();
+  if (settings.memorySaveMode === 'off') {
+    const result: ExplicitMemoryCaptureResult = {
+      saved: 0,
+      candidates: 0,
+      rejected: 1,
+      items: [{ status: 'rejected_policy', factId: null, candidateId: null, reason: 'Automatic memory writes are disabled' }],
+    };
+    rememberPendingExplicitMemoryResult(input, result);
+    return result;
+  }
+
+  let content = extractExplicitMemoryContent(command);
+  let sourceMessageId = input.sourceMessageId ?? null;
+  if (!content && isFileMemoryCommand(command)) {
+    const fileImport = await importStagedMemoryArtifacts({
+      provider: input.providerId,
+      prompt: command,
+      pageSessionId: input.pageSessionId,
+      conversationId: input.externalConversationId,
+    }, input.projectId, true);
+    if (fileImport.files) {
+      await clearPendingFileMemoryIntent({
+        provider: input.providerId,
+        pageSessionId: input.pageSessionId,
+        conversationId: input.externalConversationId,
+      });
+    }
+    await setFileImportDiagnostic(fileImport, input.providerId);
+    const result: ExplicitMemoryCaptureResult = {
+      saved: fileImport.saved + fileImport.duplicates,
+      candidates: 0,
+      rejected: fileImport.rejected,
+      items: [],
+    };
+    rememberPendingExplicitMemoryResult(input, result);
+    return result;
+  }
+  if (!content && !isFileMemoryCommand(command) && (isContextualMemoryCommand(command) || isBulkMemoryCommand(command))) {
+    const contextual = await latestContextualMemorySource(input.conversationId, input.sourceMessageId);
+    content = contextual?.content ?? null;
+    sourceMessageId = contextual?.sourceMessageId ?? sourceMessageId;
+  }
+  if (!content) return undefined;
+
+  const captureKey = [
+    input.providerId,
+    input.externalConversationId ?? input.pageSessionId ?? input.conversationId ?? 'unknown',
+    fingerprint(normalizeEvidenceText(content)),
+  ].join(':');
+  const now = Date.now();
+  for (const [key, value] of recentExplicitMemoryCaptures) {
+    if (now - value.at > 30_000) recentExplicitMemoryCaptures.delete(key);
+  }
+  const cached = recentExplicitMemoryCaptures.get(captureKey);
+  if (cached) {
+    rememberPendingExplicitMemoryResult(input, cached.result);
+    return cached.result;
+  }
+
+  const items: ExplicitMemoryCaptureResult['items'] = [];
+  const chunks = splitMemoryAtSemanticBoundaries(content);
+  for (const chunk of chunks) {
+    if (!isDurableMemoryContent(chunk)) {
+      items.push({ status: 'invalid', factId: null, candidateId: null, reason: 'Content is not durable long-term memory' });
+      continue;
+    }
+    const outcome = await memory.propose({
+      type: inferExplicitMemoryType(chunk),
+      scope: input.projectId ? 'project' : 'global',
+      projectId: input.projectId,
+      content: chunk,
+      importance: 0.8,
+      confidence: 1,
+      sourceKind: 'user_message',
+      sourceMessageId,
+      sourceQuote: chunk,
+      policy: toMemoryWritePolicy(settings.memorySaveMode),
+      explicitUserIntent: true,
+      reason: 'User explicitly requested local memory persistence',
+    });
+    items.push({
+      status: outcome.status,
+      factId: outcome.fact?.id ?? null,
+      candidateId: outcome.candidate?.id ?? null,
+      reason: outcome.reason,
+    });
+  }
+
+  const result: ExplicitMemoryCaptureResult = {
+    saved: items.filter((item) => ['created', 'reinforced', 'updated'].includes(item.status)).length,
+    candidates: items.filter((item) => ['pending_confirmation', 'conflict'].includes(item.status)).length,
+    rejected: items.filter((item) => !['created', 'reinforced', 'updated', 'pending_confirmation', 'conflict'].includes(item.status)).length,
+    items,
+  };
+  recentExplicitMemoryCaptures.set(captureKey, { at: now, result });
+  rememberPendingExplicitMemoryResult(input, result);
+  if (result.saved > 0 || result.candidates > 0) await notifyMemoryChanged('');
+  await storage.setSetting(memoryDiagnosticKey, {
+    stage: result.saved > 0 ? 'explicit-memory-saved-locally' : result.candidates > 0 ? 'explicit-memory-awaiting-review' : 'explicit-memory-rejected',
+    detail: formatMemorySaveStatus({ ok: true, result }),
+    count: result.saved,
+    provider: input.providerId,
+    at: Date.now(),
+  });
+  return result;
+}
+
+async function latestContextualMemorySource(
+  conversationId?: string | null,
+  currentSourceMessageId?: string | null,
+): Promise<{ content: string; sourceMessageId: string } | null> {
+  if (!conversationId) return null;
+  const messages = await storage.listMessages(conversationId);
+  for (const message of messages.slice().reverse()) {
+    if (message.externalId === currentSourceMessageId) continue;
+    if (message.role !== 'user' && message.role !== 'assistant') continue;
+    if (isInternalProtocolMessage(message.content)) continue;
+    const content = userFacingMemoryCommandText(message.content).trim();
+    if (!content || isExplicitMemoryCommand(content) || !isDurableMemoryContent(content)) continue;
+    return { content, sourceMessageId: message.externalId ?? message.id };
+  }
+  return null;
+}
+
+function rememberPendingExplicitMemoryResult(input: ExplicitMemoryCaptureInput, result: ExplicitMemoryCaptureResult): void {
+  const keys = explicitMemoryResultKeys(input.providerId, input.externalConversationId, input.pageSessionId);
+  if (!keys.length) return;
+  const now = Date.now();
+  for (const [key, value] of pendingExplicitMemoryResults) {
+    if (now - value.at > 2 * 60_000) pendingExplicitMemoryResults.delete(key);
+  }
+  const pending = { id: crypto.randomUUID(), at: now, result };
+  for (const key of keys) pendingExplicitMemoryResults.set(key, pending);
+}
+
+function takePendingExplicitMemoryResult(
+  payload: NonNullable<ExtensionMessage<'omni:response-update'>['payload']>,
+): PendingExplicitMemoryResult | undefined {
+  const now = Date.now();
+  let match: PendingExplicitMemoryResult | undefined;
+  for (const key of explicitMemoryResultKeys(payload.provider, payload.conversationId, payload.pageSessionId)) {
+    const candidate = pendingExplicitMemoryResults.get(key);
+    if (candidate && now - candidate.at <= 2 * 60_000) {
+      match = candidate;
+      break;
+    }
+  }
+  for (const [key, value] of pendingExplicitMemoryResults) {
+    if (now - value.at > 2 * 60_000 || (match && value.id === match.id)) pendingExplicitMemoryResults.delete(key);
+  }
+  return match;
+}
+
+function explicitMemoryResultKeys(
+  providerId: 'deepseek' | 'kimi',
+  conversationId?: string | null,
+  pageSessionId?: string,
+): string[] {
+  return [
+    conversationId ? `${providerId}:conversation:${conversationId}` : '',
+    pageSessionId ? `${providerId}:page:${pageSessionId}` : '',
+  ].filter(Boolean);
+}
+
+function fingerprint(value: string): string {
+  let result = 2166136261;
+  for (const char of value) {
+    result ^= char.codePointAt(0) ?? 0;
+    result = Math.imul(result, 16777619);
+  }
+  return (result >>> 0).toString(36);
+}
+
 async function handleModelToolCall(message: ExtensionMessage<'omni:response-update'>): Promise<void> {
   const payload = message.payload;
   if (!payload || payload.role !== 'assistant' || payload.state === 'partial' || handledModelActions.has(payload.messageId)) return;
   const parsed = parseAgentDecision(payload.text);
-  if (!parsed.ok || parsed.decision.type !== 'tool_call') return;
+  const localResult = takePendingExplicitMemoryResult(payload);
+  if (!parsed.ok || parsed.decision.type !== 'tool_call') {
+    if (localResult) {
+      await sendToActiveTab({
+        type: 'omni:render-tool-status',
+        payload: { messageId: payload.messageId, text: formatMemorySaveStatus({ ok: true, result: localResult.result }) },
+      });
+    }
+    return;
+  }
   // The first production loop deliberately exposes only OmniAgent-owned
   // memory tools; web research stays with the provider's native abilities.
   if (!['memory.search', 'memory.save', 'memory.save_batch'].includes(parsed.decision.toolName)) return;
   handledModelActions.add(payload.messageId);
   if (handledModelActions.size > 200) handledModelActions.clear();
 
-  const settings = await getRuntimeSettings();
+  // The explicit user text was already committed locally. The provider tool
+  // block is only a duplicated acknowledgement and must not decide whether the
+  // write happened or inflate the source count.
+  if (parsed.decision.toolName === 'memory.save_batch' && localResult) {
+    await sendToActiveTab({
+      type: 'omni:render-tool-status',
+      payload: { messageId: payload.messageId, text: formatMemorySaveStatus({ ok: true, result: localResult.result }) },
+    });
+    return;
+  }
+
   const explicitMemoryRequest = parsed.decision.toolName === 'memory.save_batch'
-    && settings.memorySaveMode === 'auto'
     && await hasExplicitMemoryRequest(payload);
   const memoryServices = parsed.decision.toolName === 'memory.save_batch' || parsed.decision.toolName === 'memory.save'
     ? {
@@ -1579,22 +1853,64 @@ async function handleModelToolCall(message: ExtensionMessage<'omni:response-upda
       services: memoryServices,
     },
   );
-  await sendToActiveTab({
-    type: 'omni:send-message',
-    payload: {
-      message: [
-        serializeToolResult({
-          name: parsed.decision.toolName,
-          ok: result.ok,
-          result: result.ok ? result.result : undefined,
-          error: result.ok ? undefined : result.error,
-        }),
-        parsed.decision.toolName === 'memory.save_batch'
-          ? '批量保存流程已经结束。不要再次调用记忆工具，不要要求确认，只用一句话告知成功、待确认和拒绝数量。'
-          : '请根据这个工具结果继续回答用户。若还需要 OmniAgent 工具，只输出一个 <omniagent-action> JSON 块；否则直接给出最终答复。',
-      ].join('\n\n'),
-    },
-  });
+  let renderedLocally = false;
+  if (parsed.decision.toolName === 'memory.save_batch') {
+    try {
+      renderedLocally = Boolean(await sendToActiveTab({
+        type: 'omni:render-tool-status',
+        payload: { messageId: payload.messageId, text: formatMemorySaveStatus(result) },
+      }));
+    } catch {
+      // The provider continuation below remains as the compatibility fallback.
+    }
+  }
+  // An explicit save command needs only the deterministic local result. Avoid
+  // a second hidden provider request, which could fail after the tool block was
+  // already hidden and leave the user looking at an empty turn.
+  if (parsed.decision.toolName === 'memory.save_batch' && explicitMemoryRequest && renderedLocally) return;
+
+  try {
+    await sendToActiveTab({
+      type: 'omni:send-message',
+      payload: {
+        message: [
+          serializeToolResult({
+            name: parsed.decision.toolName,
+            ok: result.ok,
+            result: result.ok ? result.result : undefined,
+            error: result.ok ? undefined : result.error,
+          }),
+          parsed.decision.toolName === 'memory.save_batch'
+            ? '批量保存流程已经结束。不要再次调用记忆工具，不要要求确认，只用一句话告知成功、待确认和拒绝数量。'
+            : '请根据这个工具结果继续回答用户。若还需要 OmniAgent 工具，只输出一个 <omniagent-action> JSON 块；否则直接给出最终答复。',
+        ].join('\n\n'),
+      },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    let fallbackRendered = renderedLocally;
+    let fallbackError = '';
+    if (!fallbackRendered) {
+      try {
+        fallbackRendered = Boolean(await sendToActiveTab({
+          type: 'omni:render-tool-status',
+          payload: {
+            messageId: payload.messageId,
+            text: formatToolContinuationFailure(parsed.decision.toolName, result, detail),
+          },
+        }));
+      } catch (renderError) {
+        fallbackError = renderError instanceof Error ? renderError.message : String(renderError);
+      }
+    }
+    await storage.setSetting(memoryDiagnosticKey, {
+      stage: 'tool-continuation-error',
+      detail: fallbackError ? `${detail}；页面错误提示也未能显示：${fallbackError}` : detail,
+      count: 0,
+      at: Date.now(),
+    });
+    if (!fallbackRendered) throw error;
+  }
 }
 
 async function hasExplicitMemoryRequest(payload: ExtensionMessage<'omni:response-update'>['payload']): Promise<boolean> {
@@ -1647,6 +1963,17 @@ async function persistPageMessage(message: ExtensionMessage<'omni:response-updat
     attachments: [],
   });
   await archiveConversationTurns(conversation.id, payload.provider, conversation.projectId);
+  if (payload.role === 'user') {
+    await captureExplicitUserMemory({
+      text: payload.text,
+      providerId: payload.provider,
+      projectId: activeProjectId,
+      conversationId: conversation.id,
+      externalConversationId: payload.conversationId,
+      pageSessionId: payload.pageSessionId,
+      sourceMessageId: payload.messageId,
+    });
+  }
 }
 
 async function archiveConversationTurns(conversationId: string, providerId: 'deepseek' | 'kimi', projectId: string | null): Promise<void> {

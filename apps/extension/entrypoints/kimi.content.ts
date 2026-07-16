@@ -1,6 +1,8 @@
 import { BrowserPageController } from '@omni-agent/browser-agent';
 import { createAdapterRegistry, kimiAdapter, providerFromAdapter } from '@omni-agent/site-adapters';
 import type { AdapterStatus, ExtensionMessage, ExtensionMessageMap } from '@omni-agent/shared';
+import { handleAdapterPageCommand, isAdapterPageCommand } from '../src/adapter-command';
+import { handleBrowserPageCommand, isBrowserPageCommand } from '../src/content/browser-command';
 import { installMainWorldBridge } from '../src/content/main-world-bridge';
 import { installMemoryFileStaging } from '../src/content/file-staging';
 
@@ -28,36 +30,13 @@ export default defineContentScript({
       provider: providerFromAdapter(adapter),
       url: window.location.href,
       conversationId: adapter?.getConversationId() ?? null,
+      health: adapter?.inspectHealth(),
     });
 
-    const handleMessage = async (message: ExtensionMessage) => {
-      if (message.type === 'omni:adapter-status') return status();
-      if (message.type === 'omni:conversation-snapshot' && adapter) return adapter.getLatestTurn();
-      if (message.type === 'omni:browser-snapshot') {
-        const payload = message.payload as ExtensionMessageMap['omni:browser-snapshot'] | undefined;
-        return pageController.snapshot(payload);
-      }
-      if (message.type === 'omni:browser-click') {
-        const payload = message.payload as ExtensionMessageMap['omni:browser-click'] | undefined;
-        return pageController.click(payload ?? {});
-      }
-      if (message.type === 'omni:browser-type') {
-        const payload = message.payload as ExtensionMessageMap['omni:browser-type'] | undefined;
-        if (!payload) throw new Error('browser.type payload is required');
-        return pageController.type(payload);
-      }
-      if (message.type === 'omni:browser-scroll') {
-        const payload = message.payload as ExtensionMessageMap['omni:browser-scroll'] | undefined;
-        return pageController.scroll(payload ?? {});
-      }
-      if (message.type === 'omni:insert-prompt' && adapter) {
-        const payload = message.payload as ExtensionMessageMap['omni:insert-prompt'] | undefined;
-        if (payload?.message) return adapter.insertPrompt(payload.message).then(() => status());
-      }
-      if (message.type === 'omni:send-message' && adapter) {
-        const payload = message.payload as ExtensionMessageMap['omni:send-message'] | undefined;
-        if (payload?.message) return adapter.sendMessage(payload.message).then(() => status());
-      }
+    const handleMessage = (message: ExtensionMessage) => {
+      if (message.target !== 'page') return undefined;
+      if (isAdapterPageCommand(message)) return handleAdapterPageCommand(message, adapter, status);
+      if (isBrowserPageCommand(message)) return handleBrowserPageCommand(message, pageController);
       return undefined;
     };
 

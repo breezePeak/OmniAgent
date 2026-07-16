@@ -4,11 +4,13 @@
   "private": true,
   "packageManager": "pnpm@10.30.3",
   "scripts": {
-    "dev": "pnpm --filter @omni-agent/extension dev",
-    "build": "pnpm --filter @omni-agent/extension build",
-    "check": "pnpm --filter @omni-agent/extension check",
-    "typecheck": "pnpm --filter \"./packages/*\" typecheck",
-    "typecheck:all": "pnpm --filter @omni-agent/extension check && pnpm --filter \"./packages/*\" typecheck",
-    "test": "pnpm --filter @omni-agent/extension test && pnpm --filter @omni-agent/storage test && pnpm --filter @omni-agent/memory test && pnpm --filter @omni-agent/skills test && pnpm --filter @omni-agent/tools test && pnpm --filter @omni-agent/browser-agent test && pnpm --filter @omni-agent/mcp test && pnpm --filter @omni-agent/site-adapters test && pnpm --filter @omni-agent/agent-protocol test && pnpm --filter @omni-agent/agent-core test"
+    "dev": "corepack pnpm --filter @omni-agent/extension dev",
+    "build": "corepack pnpm --filter @omni-agent/extension build",
+    "check": "corepack pnpm --filter @omni-agent/extension check",
+    "typecheck": "corepack pnpm --filter \"./packages/*\" --if-present typecheck",
+    "typecheck:all": "corepack pnpm --filter @omni-agent/extension check && corepack pnpm --filter \"./packages/*\" --if-present typecheck",
+    "test": "corepack pnpm --filter \"./apps/*\" --filter \"./packages/*\" --if-present test",
+    "verify:build": "node scripts/verify-extension-build.mjs",
+    "release:check": "corepack pnpm typecheck:all && corepack pnpm test && corepack pnpm build && corepack pnpm verify:build"
   }
 }

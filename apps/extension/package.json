@@ -8,7 +8,7 @@
     "build": "wxt build",
     "check": "wxt prepare && vue-tsc --noEmit",
     "typecheck": "vue-tsc --noEmit",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/adapter-command.test.ts test/explicit-memory.test.ts test/file-staging.test.ts test/memory-intent.test.ts test/memory-write-quality.test.ts test/prompt-injector.test.ts test/tool-status.test.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

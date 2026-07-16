@@ -5,7 +5,7 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "scripts": {
-    "test": "tsx --test test/response-observer.test.ts",
+    "test": "tsx --test test/dom-adapter.test.ts test/response-observer.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": { "@omni-agent/shared": "workspace:*" },

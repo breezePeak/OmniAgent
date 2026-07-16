@@ -3,10 +3,21 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: Error };
 
 export type SupportedProvider = 'deepseek' | 'kimi';
 
+export interface AdapterHealthStatus {
+  contentScript: boolean;
+  inputFound: boolean;
+  submitFound: boolean;
+  submitEnabled: boolean;
+  messageCount: number;
+  responseCount: number;
+  checkedAt: number;
+}
+
 export interface AdapterStatus {
   provider: SupportedProvider | null;
   url: string;
   conversationId: string | null;
+  health?: AdapterHealthStatus;
 }
 
 export interface ConversationTurn {
@@ -147,6 +158,7 @@ export interface ExtensionMessageMap {
   };
   'omni:insert-prompt': { message: string };
   'omni:send-message': { message: string };
+  'omni:render-tool-status': { messageId: string; text: string };
   'omni:response-update': {
     provider: SupportedProvider;
     role: 'user' | 'assistant';
@@ -169,4 +181,5 @@ export interface ExtensionMessageMap {
 export type ExtensionMessage<T extends keyof ExtensionMessageMap = keyof ExtensionMessageMap> = {
   type: T;
   payload?: ExtensionMessageMap[T];
+  target?: 'page';
 };

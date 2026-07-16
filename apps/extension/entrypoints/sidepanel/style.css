@@ -53,7 +53,13 @@ h1 { margin: 0; font-size: 30px; line-height: 1.15; letter-spacing: -.04em; }
 .active-ai-card.connected { border-color: #86efac; background: #f0fdf4; color: #166534; }
 .quick-card-label { color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .active-ai-card strong { font-size: 16px; }
-.active-ai-card span:last-child { color: #64748b; font-size: 12px; }
+.active-ai-note { color: #64748b; font-size: 12px; }
+.adapter-health { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 6px; }
+.adapter-health-item { display: inline-flex; align-items: center; gap: 5px; color: #64748b; font-size: 11px; white-space: nowrap; }
+.adapter-health-item::before { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; content: ''; }
+.adapter-health-item[data-state='ready']::before { background: #16a34a; }
+.adapter-health-item[data-state='error'] { color: #b91c1c; }
+.adapter-health-item[data-state='error']::before { background: #dc2626; }
 .settings-link { min-height: 44px; margin-top: 8px; padding: 0; border: 0; background: transparent; color: #475569; cursor: pointer; font: inherit; font-size: 13px; }
 .settings-link:hover { color: #2563eb; }
 .detail-header { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 8px; }

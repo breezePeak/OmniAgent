@@ -21,6 +21,12 @@ test('recognizes supported explicit and bulk save commands', () => {
   assert.equal(isBulkMemoryCommand('不要废话，全部保存'), true);
 });
 
+test('recognizes concise direct commands without a polite prefix', () => {
+  for (const text of ['记住：服务端口是 8080', '记住我叫张三', '我叫张三，记住']) {
+    assert.equal(isExplicitMemoryCommand(text), true, text);
+  }
+});
+
 test('does not turn memory questions or negated commands into writes', () => {
   for (const text of ['如何查看记忆', '我的记忆有问题', '为什么没有记忆', '不要保存这个文件', '别把这些考题记住', '我没让你把这个文件保存到记忆里', '不要把这段聊天保存到记忆里']) {
     assert.equal(isExplicitMemoryCommand(text), false, text);
@@ -33,6 +39,12 @@ test('recognizes a save command that refers to the preceding attachment', () => 
   assert.equal(isExplicitMemoryCommand(text), true);
   assert.equal(isFileMemoryCommand(text), false);
   assert.equal(isContextualMemoryCommand(text), true);
+});
+
+test('recognizes references to preceding or current conversation content', () => {
+  for (const text of ['记住以上内容', '请把这段内容保存到长期记忆', '把当前对话保存到长期记忆']) {
+    assert.equal(isContextualMemoryCommand(text), true, text);
+  }
 });
 
 test('extracts the user sentence from a provider-rendered augmented prompt', () => {

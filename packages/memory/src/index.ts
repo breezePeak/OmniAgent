@@ -66,6 +66,8 @@ export interface MemoryProposalInput extends MemoryInput {
   actionId?: string | null;
   policy?: MemoryWritePolicy;
   explicitUserIntent?: boolean;
+  /** Set only after the caller verified sourceMessageId/sourceQuote against local chat history. */
+  sourceVerified?: boolean;
   allowRevision?: boolean;
   reason?: string;
 }
@@ -113,14 +115,16 @@ export class MemoryService {
       return { status: 'rejected_policy', fact: null, candidate: null, reason: 'Assistant replies are not a memory source' };
     }
 
+    const verifiedAutoWrite = prepared.sourceKind === 'model_tool'
+      && prepared.policy === 'auto_safe'
+      && prepared.sourceVerified;
     const shouldReview = prepared.sourceKind !== 'manual' && prepared.sourceKind !== 'migration' && (
       prepared.policy === 'review_all'
       || prepared.policy === 'manual_only'
-      // A model tool call normally needs review. In auto-safe mode it may
-      // write directly only when the extension independently established that
-      // the user explicitly asked to remember this information.
-      || (prepared.sourceKind === 'model_tool' && !prepared.explicitUserIntent)
-      || !prepared.explicitUserIntent
+      // Auto mode can write a model-curated fact only after the extension has
+      // matched its quote and message id against the local conversation.
+      || (prepared.sourceKind === 'model_tool' && !verifiedAutoWrite)
+      || (!prepared.explicitUserIntent && !verifiedAutoWrite)
       || prepared.confidence < 0.9
     );
 
@@ -447,7 +451,7 @@ type PreparedMemory = Required<Pick<MemoryProposalInput, 'type'>> & {
   importance: number; confidence: number; pinned: boolean; sensitivity: MemorySensitivity; injectionPolicy: MemoryInjectionPolicy;
   sourceKind: MemorySourceKind; sourceMessageId: string | null; sourceQuote: string | null;
   artifactId: string | null; artifactLocator: MemoryArtifactLocator | null;
-  explicitUserIntent: boolean; allowRevision: boolean; reason?: string;
+  explicitUserIntent: boolean; sourceVerified: boolean; allowRevision: boolean; reason?: string;
   policy: MemoryWritePolicy;
 };
 
@@ -471,7 +475,8 @@ function prepare(input: MemoryProposalInput): PreparedMemory | null {
     sensitivity: looksSecret(value) ? 'secret' : isPersonal(input.type) ? 'personal' : 'normal', injectionPolicy: looksSecret(value) ? 'never' : input.type === 'preference' ? 'always' : 'relevant',
     sourceKind, sourceMessageId, sourceQuote: input.sourceQuote?.trim() || null,
     artifactId: input.artifactId ?? null, artifactLocator: input.artifactLocator ?? null,
-    explicitUserIntent: input.explicitUserIntent ?? sourceKind === 'manual', allowRevision: input.allowRevision ?? sourceKind === 'manual', reason: input.reason, policy: input.policy ?? 'review_all',
+    explicitUserIntent: input.explicitUserIntent ?? sourceKind === 'manual', sourceVerified: input.sourceVerified ?? false,
+    allowRevision: input.allowRevision ?? sourceKind === 'manual', reason: input.reason, policy: input.policy ?? 'review_all',
   };
 }
 

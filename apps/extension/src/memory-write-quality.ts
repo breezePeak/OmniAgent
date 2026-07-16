@@ -44,7 +44,7 @@ export function isDurableMemoryContent(content: string): boolean {
   if (!normalized || isInternalProtocolMessage(normalized)) return false;
   if (/<\/?omniagent-(?:action|tool-result|memory-context|memory-sources)>/iu.test(normalized)) return false;
   if (/^[\[{]\s*"(?:name|type|toolName|sourceMessageId)"\s*:/u.test(normalized)) return false;
-  if (/^(?:已思考|思考过程|推理过程|分析过程|工具结果|执行结果|请(?:回复|确认)|待确认|等待用户确认)(?:\s|：|:|，|,|。|！|!|$)/u.test(normalized)) return false;
+  if (/^(?:已思考|思考过程|推理过程|分析过程|工具结果|执行结果|记忆处理完成|记忆保存失败|请(?:回复|确认)|待确认|等待用户确认)(?:\s|：|:|，|,|。|！|!|$)/u.test(normalized)) return false;
   if (/^(?:好的|收到|明白)[，,。！!\s]*(?:我会|将|已|现在)?(?:保存|记住|提交|处理|继续)/u.test(normalized)) return false;
   if (/(?:请根据这个工具结果继续回答用户|只输出一个\s*<omniagent-action>|Awaiting user confirmation)/iu.test(normalized)) return false;
   return !isMemoryControlPlaneText(normalized);

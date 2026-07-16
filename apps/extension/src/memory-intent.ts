@@ -40,7 +40,8 @@ export function isExplicitMemoryCommand(text: string): boolean {
     || /(?:请|帮我|替我|给我|麻烦)(?:把|将)?(?:记住|记下|记牢|记忆).{1,180}/u.test(normalized)
     || /(?:请|帮我|替我|给我|麻烦)?(?:把|将)?.{1,180}(?:保存|写入|加入|存入)(?:到|进)?(?:长期)?记忆/u.test(normalized)
     || /(?:你|以后)(?:一定|务必|必须|要|得).{0,8}(?:记住|记下|记牢).{1,180}/u.test(normalized)
-    || /^(?:记住|记下|记牢)(?:这个|这些|以下|上面|刚才|我).{1,180}/u.test(normalized);
+    || /^(?:记住|记下|记牢)(?:[：:，,\s]|这个|这些|这段|以下|以上|上面|上述|前面|当前|刚才|我).{1,180}/u.test(normalized)
+    || /^.{1,180}[，,\s](?:请)?(?:记住|记下|记牢)[！!。\s]*$/u.test(normalized);
 }
 
 /**
@@ -50,7 +51,7 @@ export function isExplicitMemoryCommand(text: string): boolean {
 export function isContextualMemoryCommand(text: string): boolean {
   const normalized = text.trim();
   if (!isExplicitMemoryCommand(normalized)) return false;
-  return /(?:我.{0,8}让你|刚才|之前|前面|上面|上述|这些|这个|这份|那个|它|跨(?:对话|会话)|永久|长期)/u.test(normalized)
+  return /(?:我.{0,8}让你|刚才|之前|前面|上面|上述|以上|这些|这个|这份|这段|当前(?:聊天|对话|内容)|那个|它|跨(?:对话|会话)|永久|长期)/u.test(normalized)
     || /^(?:请|帮我|给我|替我)?(?:保存|存入|写入)(?:到|进)?(?:长期)?记忆(?:里|中)?/u.test(normalized);
 }
 

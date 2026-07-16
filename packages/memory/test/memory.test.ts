@@ -61,11 +61,31 @@ test('an explicitly requested model memory save writes directly in auto-safe mod
   const { memory } = createMemory(t);
   const outcome = await memory.propose({
     type: 'profile', content: '朋友小白有一条狗叫小黑', sourceKind: 'model_tool',
-    policy: 'auto_safe', explicitUserIntent: true, confidence: 1,
+    policy: 'auto_safe', explicitUserIntent: true, sourceVerified: true, confidence: 1,
   });
   assert.equal(outcome.status, 'created');
   assert.equal((await memory.listCandidates('pending')).length, 0);
   assert.equal((await memory.retrieve('小白的狗叫什么')).length, 1);
+});
+
+test('a source-verified safe model extraction saves automatically without an explicit command', async (t) => {
+  const { memory } = createMemory(t);
+  const outcome = await memory.propose({
+    type: 'profile', content: '我的孩子正在上幼儿园', sourceKind: 'model_tool',
+    sourceMessageId: 'message-1', sourceQuote: '我的孩子正在上幼儿园',
+    policy: 'auto_safe', explicitUserIntent: false, sourceVerified: true, confidence: 1,
+  });
+  assert.equal(outcome.status, 'created');
+  assert.equal((await memory.listCandidates('pending')).length, 0);
+});
+
+test('an unverified model extraction still requires review in auto-safe mode', async (t) => {
+  const { memory } = createMemory(t);
+  const outcome = await memory.propose({
+    type: 'profile', content: '我的孩子正在上幼儿园', sourceKind: 'model_tool',
+    policy: 'auto_safe', explicitUserIntent: false, confidence: 1,
+  });
+  assert.equal(outcome.status, 'pending_confirmation');
 });
 
 test('automatically saves durable user profile statements under the safe policy', async (t) => {
@@ -171,7 +191,7 @@ test('expires unconfirmed candidates and archives stale low-retention facts with
   const memory = new MemoryService(storage, () => now);
 
   const candidate = await memory.propose({
-    type: 'knowledge', content: '待确认的临时信息', sourceKind: 'model_tool', policy: 'auto_safe', confidence: 1,
+    type: 'knowledge', content: '待确认的临时信息', sourceKind: 'model_tool', policy: 'review_all', confidence: 1,
   });
   const episode = await memory.save({ type: 'episode', content: '本次会议决定周五发布', importance: 1, confidence: 1 });
   const knowledge = await memory.save({ type: 'knowledge', content: '低权重旧知识', importance: 0.1, confidence: 0.1 });

@@ -1,4 +1,4 @@
-import type { ConversationTurn } from '@omni-agent/shared';
+import type { AdapterHealthStatus, ConversationTurn } from '@omni-agent/shared';
 import { ResponseObserver } from './response-observer.js';
 import type { ModelResponse, ObservedMessage, SiteAdapter } from './index.js';
 
@@ -14,6 +14,7 @@ export interface DomAdapterOptions {
 
 export class DomSiteAdapter implements SiteAdapter {
   readonly id: string;
+  private readonly toolStatuses = new Map<string, string>();
 
   constructor(private readonly options: DomAdapterOptions) {
     this.id = options.id;
@@ -48,26 +49,82 @@ export class DomSiteAdapter implements SiteAdapter {
     const input = this.findElement<HTMLElement>(this.options.inputSelectors);
     if (!input) throw new Error(`${this.id}: message input was not found`);
 
-    input.focus();
-    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(input, message);
-    } else {
-      input.textContent = message;
+    const current = readInputText(input);
+    if (sameComposerText(current, message)) {
+      input.focus();
+      return;
     }
+    if (current.trim()) {
+      throw new Error(`${this.id}: message input is not empty; clear the existing draft before inserting a new prompt`);
+    }
+
+    input.focus();
+    writeInputText(input, message);
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste', data: message }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
     input.focus();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    if (!sameComposerText(readInputText(input), message)) {
+      throw new Error(`${this.id}: message input rejected the inserted prompt`);
+    }
   }
 
   hideInternalProtocolMessages(): void {
-    const selector = this.options.messageSelectors.join(',');
-    const marked = Array.from(document.querySelectorAll(selector))
-      .filter((element) => /<omniagent-(?:action|tool-result)\b/iu.test(element.textContent ?? ''));
-    const leafMessages = marked.filter((element) => !marked.some((candidate) => candidate !== element && element.contains(candidate)));
-    for (const element of leafMessages) {
+    for (const element of this.messageElements()) {
+      const message = this.readMessage(element);
+      const status = message?.role === 'assistant' ? this.toolStatuses.get(message.id) : undefined;
+      if (status) this.replaceMessage(element, status);
+    }
+    for (const element of this.internalProtocolMessages()) {
+      const messageId = this.readMessage(element)?.id;
+      const status = messageId ? this.toolStatuses.get(messageId) : undefined;
+      if (status) {
+        this.replaceMessage(element, status);
+        continue;
+      }
       element.setAttribute('data-omniagent-internal', 'true');
       (element as HTMLElement).style.setProperty('display', 'none', 'important');
+    }
+  }
+
+  inspectHealth(): AdapterHealthStatus {
+    const input = this.findElement<HTMLElement>(this.options.inputSelectors);
+    const submit = input
+      ? this.findSubmitNearInput(input) ?? this.findElement<HTMLElement>(this.options.submitSelectors)
+      : this.findElement<HTMLElement>(this.options.submitSelectors);
+    const messages = this.messageElements()
+      .map((element) => this.readMessage(element))
+      .filter((message): message is ObservedMessage => message !== null);
+    return {
+      contentScript: true,
+      inputFound: Boolean(input),
+      submitFound: Boolean(submit),
+      submitEnabled: Boolean(submit && !isDisabled(submit)),
+      messageCount: messages.filter((message) => message.role === 'user').length,
+      responseCount: messages.filter((message) => message.role === 'assistant').length,
+      checkedAt: Date.now(),
+    };
+  }
+
+  renderToolStatus(messageId: string, text: string): boolean {
+    const exact = this.messageElements().find((element) => {
+      const message = this.readMessage(element);
+      return message?.role === 'assistant' && message.id === messageId;
+    });
+    const target = exact ?? this.internalProtocolMessages().at(-1);
+    if (!target || !text.trim()) return false;
+    this.toolStatuses.set(messageId, text.trim());
+    if (this.toolStatuses.size > 100) this.toolStatuses.delete(this.toolStatuses.keys().next().value!);
+    this.replaceMessage(target, text.trim());
+    return true;
+  }
+
+  private replaceMessage(target: Element, text: string): void {
+    const content = this.findResponseHost(target) ?? target;
+    if (content.textContent?.trim() !== text) content.textContent = text;
+    for (const element of new Set([target, content])) {
+      element.removeAttribute('data-omniagent-internal');
+      (element as HTMLElement).style.removeProperty('display');
     }
   }
 
@@ -127,14 +184,28 @@ export class DomSiteAdapter implements SiteAdapter {
   }
 
   private readMessage(element: Element): ObservedMessage | null {
-    const responseHosts = Array.from(element.querySelectorAll(this.options.responseSelectors.join(',')))
-      .filter((host) => !host.parentElement?.closest(this.options.responseSelectors.join(',')));
-    const responseHost = responseHosts.at(-1);
+    const responseHost = this.findResponseHost(element);
     const text = (responseHost ?? element).textContent?.trim();
     if (!text) return null;
     const role = responseHost ? 'assistant' : 'user';
     const id = this.findMessageId(element, responseHost) ?? `${role}:${text}`;
     return { id, role, text };
+  }
+
+  private internalProtocolMessages(): Element[] {
+    const marked = this.messageElements()
+      .filter((element) => /<omniagent-(?:action|tool-result)\b/iu.test(element.textContent ?? ''));
+    return marked.filter((element) => !marked.some((candidate) => candidate !== element && element.contains(candidate)));
+  }
+
+  private messageElements(): Element[] {
+    return Array.from(document.querySelectorAll(this.options.messageSelectors.join(',')));
+  }
+
+  private findResponseHost(element: Element): Element | undefined {
+    return Array.from(element.querySelectorAll(this.options.responseSelectors.join(',')))
+      .filter((host) => !host.parentElement?.closest(this.options.responseSelectors.join(',')))
+      .at(-1);
   }
 
   private findMessageId(message: Element, responseHost?: Element): string | null {
@@ -184,21 +255,44 @@ export class DomSiteAdapter implements SiteAdapter {
   }
 
   private clearInternalPrompt(input: HTMLElement, message: string): void {
-    const current = input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement ? input.value : input.textContent ?? '';
+    const current = readInputText(input);
     if (current !== message || !/<omniagent-(?:action|tool-result)\b/iu.test(message)) return;
-    if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      setter?.call(input, '');
-    } else {
-      input.textContent = '';
-    }
+    writeInputText(input, '');
     input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 }
 
+function isTextControl(element: HTMLElement): element is HTMLTextAreaElement | HTMLInputElement {
+  return (typeof HTMLTextAreaElement !== 'undefined' && element instanceof HTMLTextAreaElement)
+    || (typeof HTMLInputElement !== 'undefined' && element instanceof HTMLInputElement);
+}
+
+function readInputText(input: HTMLElement): string {
+  return isTextControl(input) ? input.value : input.textContent ?? '';
+}
+
+function writeInputText(input: HTMLElement, value: string): void {
+  if (!isTextControl(input)) {
+    input.textContent = value;
+    return;
+  }
+
+  const prototype = typeof HTMLTextAreaElement !== 'undefined' && input instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype
+    : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+  if (setter) setter.call(input, value);
+  else input.value = value;
+}
+
+function sameComposerText(actual: string, expected: string): boolean {
+  const normalize = (value: string) => value.replace(/\u00a0/gu, ' ').replace(/\r\n?/gu, '\n').trim();
+  return normalize(actual) === normalize(expected);
+}
+
 function isDisabled(element: HTMLElement): boolean {
-  return element instanceof HTMLButtonElement
+  return typeof HTMLButtonElement !== 'undefined' && element instanceof HTMLButtonElement
     ? element.disabled
     : element.getAttribute('aria-disabled') === 'true' || element.hasAttribute('disabled');
 }

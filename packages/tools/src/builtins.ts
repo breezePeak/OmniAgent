@@ -51,7 +51,7 @@ export const memorySaveTool: ToolDefinition = {
 
 export const memorySaveBatchTool: ToolDefinition = {
   name: 'memory.save_batch',
-  description: 'Save a user-approved batch of curated long-term memories in one operation. Every item must contain content, exact sourceQuotes copied from the current conversation, and their sourceMessageIds; type and importance (0-1) are optional.',
+  description: 'Save a source-verified batch of curated long-term memories in one operation. Every item must contain content, exact sourceQuotes copied from the current conversation, and their sourceMessageIds; type and importance (0-1) are optional.',
   source: 'builtin',
   permissions: ['memory.write'],
   parameters: [
